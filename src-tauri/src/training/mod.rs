@@ -102,6 +102,9 @@ pub struct Mistake {
     pub clock_secs: Option<f32>,
     pub time_spent_secs: Option<f32>,
     pub tags: Vec<String>,
+    /// Engine's second-best move and its eval (your POV) — instant credit for it in drills.
+    pub second_uci: Option<String>,
+    pub second_cp: Option<i32>,
     // game context
     pub opponent: String,
     pub opening: Option<String>,
@@ -269,4 +272,31 @@ pub struct CoachSettingsUpdate {
     pub explain_model: String,
     pub insight_model: String,
     pub auto_insight_every: u32,
+}
+
+/// One engine line for interactive drills. `cp` is from the side to move's view
+/// (mate mapped to ±1000).
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DrillLine {
+    pub cp: i32,
+    pub mate: Option<i32>,
+    pub pv_uci: Vec<String>,
+    pub pv_san: Vec<String>,
+}
+
+/// Where a mistake sits in its game (needs the game's moves, stored since Drills v2).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MistakeContext {
+    /// Position before your opponent's last move, and that move.
+    pub prev_fen: Option<String>,
+    pub prev_move_uci: Option<String>,
+    pub prev_move_san: Option<String>,
+    /// What actually happened in the game from the mistake onwards (UCI + SAN, ≤8 plies).
+    pub game_continuation_uci: Vec<String>,
+    pub game_continuation_san: Vec<String>,
+    /// Whole game for "Open in analysis board".
+    pub start_fen: Option<String>,
+    pub all_moves_san: Vec<String>,
 }

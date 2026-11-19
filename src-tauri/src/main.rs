@@ -194,6 +194,8 @@ fn main() {
             training_commands::training_stats,
             training_commands::training_mistakes,
             training_commands::training_mistake,
+            training_commands::training_analyse,
+            training_commands::training_mistake_context,
             training_commands::training_drill_queue,
             training_commands::training_save_card,
             training_commands::training_facts,

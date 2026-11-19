@@ -29,6 +29,8 @@ export type Mistake = {
     clockSecs: number | null;
     timeSpentSecs: number | null;
     tags: string[];
+    secondUci: string | null;
+    secondCp: number | null;
     opponent: string;
     opening: string | null;
     timeControl: string | null;
@@ -73,6 +75,18 @@ export type Insight = {
     strengths: string[];
     plan: string[];
     progressNote: string;
+};
+
+export type DrillLine = { cp: number; mate: number | null; pvUci: string[]; pvSan: string[] };
+
+export type MistakeContext = {
+    prevFen: string | null;
+    prevMoveUci: string | null;
+    prevMoveSan: string | null;
+    gameContinuationUci: string[];
+    gameContinuationSan: string[];
+    startFen: string | null;
+    allMovesSan: string[];
 };
 
 export type DrillCard = { mistake: Mistake; cardJson: string | null; focus: boolean };
@@ -134,6 +148,10 @@ export const training = {
     cancelIngest: () => invoke<void>("cancel_analysis", { id: INGEST_PROGRESS_ID }),
     stats: () => invoke<TrainingStats>("training_stats"),
     mistakes: (filter: MistakeFilter = {}) => invoke<Mistake[]>("training_mistakes", { filter }),
+    analyse: (enginePath: string, fen: string, depth = 14, multipv = 1) =>
+        invoke<DrillLine[]>("training_analyse", { enginePath, fen, depth, multipv }),
+    mistakeContext: (mistakeId: number) =>
+        invoke<MistakeContext>("training_mistake_context", { mistakeId }),
     mistake: (id: number) => invoke<Mistake | null>("training_mistake", { id }),
     drillQueue: (limit = 20, newLimit = 10) =>
         invoke<DrillCard[]>("training_drill_queue", { limit, newLimit }),

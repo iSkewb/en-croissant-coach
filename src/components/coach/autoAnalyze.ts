@@ -19,7 +19,7 @@ export function connectedAccounts(): AccountRef[] {
     return out;
 }
 
-function pickEngine(engineId: string): LocalEngine | null {
+export function pickEngine(engineId: string): LocalEngine | null {
     const engines = getDefaultStore().get(enginesAtom) ?? [];
     const local = engines.filter((e): e is LocalEngine => e.type === "local");
     return local.find((e) => e.id === engineId) ?? local[0] ?? null;

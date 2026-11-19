@@ -20,6 +20,7 @@ export function MistakeBoard({
   shapes = [],
   onMove,
   highlightSquare,
+  lastMove,
   size = 420,
 }: {
   fen: string;
@@ -27,6 +28,8 @@ export function MistakeBoard({
   shapes?: DrawShape[];
   onMove?: (uci: string) => void;
   highlightSquare?: string | null;
+  /** UCI of the move that led to this position (highlighted). */
+  lastMove?: string | null;
   size?: number;
 }) {
   const [pos] = positionFromFen(fen);
@@ -69,6 +72,9 @@ export function MistakeBoard({
               },
             },
           }}
+          lastMove={
+            lastMove ? [lastMove.slice(0, 2) as Key, lastMove.slice(2, 4) as Key] : undefined
+          }
           check={pos?.isCheck()}
         />
       </Box>

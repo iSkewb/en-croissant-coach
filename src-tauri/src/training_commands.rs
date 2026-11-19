@@ -12,9 +12,10 @@ use crate::{
     error::Error,
     progress::update_progress,
     training::{
-        claude_code, coach, coach::Backend, ingest, store::Store, CoachSettings,
-        CoachSettingsUpdate, CoachSettingsView, DrillCard, IngestOptions, IngestSummary, Insight,
-        Mistake, MistakeFilter, TrainingError, TrainingStats, PROVIDER_API,
+        claude_code, coach, coach::Backend, features, ingest, store::Store, uci::UciEngine,
+        CoachSettings, CoachSettingsUpdate, CoachSettingsView, DrillCard, DrillLine, IngestOptions,
+        IngestSummary, Insight, Mistake, MistakeContext, MistakeFilter, TrainingError,
+        TrainingStats, PROVIDER_API,
     },
     AppState,
 };
@@ -302,4 +303,50 @@ pub async fn training_tag_glossary() -> Result<Vec<(String, String)>, Error> {
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect())
+}
+
+/// One engine kept alive between drill moves (spawning Stockfish per move is slow).
+static DRILL_ENGINE: once_cell::sync::Lazy<tokio::sync::Mutex<Option<(String, UciEngine)>>> =
+    once_cell::sync::Lazy::new(|| tokio::sync::Mutex::new(None));
+
+/// Analyse a drill position locally with Stockfish (never uses Claude).
+/// Scores are from the side to move's point of view.
+#[tauri::command]
+#[specta::specta]
+pub async fn training_analyse(
+    engine_path: String,
+    fen: String,
+    depth: u32,
+    multipv: u32,
+) -> Result<Vec<DrillLine>, Error> {
+    let pos = features::parse_fen(&fen).ok_or_else(|| Error::Training("invalid position".into()))?;
+    if shakmaty::Position::is_game_over(&pos) {
+        return Ok(vec![]);
+    }
+    let mut guard = DRILL_ENGINE.lock().await;
+    if guard.as_ref().map(|(p, _)| p != &engine_path).unwrap_or(true) {
+        if let Some((_, old)) = guard.take() {
+            old.quit().await;
+        }
+        let e = UciEngine::spawn(&engine_path, 2, 64).await?;
+        *guard = Some((engine_path.clone(), e));
+    }
+    let (_, engine) = guard.as_mut().expect("engine just set");
+    match engine.analyse(&fen, &[], depth.clamp(6, 24), multipv.clamp(1, 4)).await {
+        Ok(lines) => Ok(features::to_drill_lines(&pos, &lines)),
+        Err(e) => {
+            // Drop a broken engine so the next call starts a fresh one.
+            *guard = None;
+            Err(e.into())
+        }
+    }
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn training_mistake_context(
+    mistake_id: i64,
+    app: tauri::AppHandle,
+) -> Result<MistakeContext, Error> {
+    Ok(Store::open(&db_path(&app)?)?.mistake_context(mistake_id)?)
 }

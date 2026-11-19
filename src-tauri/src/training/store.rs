@@ -118,6 +118,8 @@ pub struct GameRow {
     pub plies: u32,
     pub engine: String,
     pub depth: u32,
+    pub start_fen: Option<String>,
+    pub moves_uci: String,
 }
 
 impl GameRow {
@@ -148,6 +150,8 @@ impl GameRow {
                 .map(|f| f.to_string_lossy().into_owned())
                 .unwrap_or_default(),
             depth,
+            start_fen: g.start_fen.clone(),
+            moves_uci: g.moves_uci.join(" "),
         }
     }
 }
@@ -159,6 +163,8 @@ pub struct NewMistake {
     pub detected: Detected,
     pub best_line_uci: Vec<String>,
     pub refutation_uci: Vec<String>,
+    /// Engine's second-best move and its eval (mover's POV).
+    pub second: Option<(String, i32)>,
 }
 
 /// Broad time-control bucket, so stats group "180+2" and "180" together as blitz.
@@ -180,6 +186,31 @@ pub fn tc_bucket(tc: Option<&str>) -> String {
     .into()
 }
 
+/// Add columns introduced after the first release (Drills v2).
+fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+    let has = |table: &str, col: &str| -> rusqlite::Result<bool> {
+        let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+        let names = stmt.query_map([], |r| r.get::<_, String>(1))?;
+        for n in names {
+            if n? == col {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    };
+    for (table, col, ty) in [
+        ("games", "start_fen", "TEXT"),
+        ("games", "moves_uci", "TEXT"),
+        ("mistakes", "second_uci", "TEXT"),
+        ("mistakes", "second_cp", "INTEGER"),
+    ] {
+        if !has(table, col)? {
+            conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {col} {ty}"))?;
+        }
+    }
+    Ok(())
+}
+
 pub struct Store {
     conn: Connection,
 }
@@ -191,7 +222,8 @@ SELECT m.id, m.game_id, m.ply, m.fen_before, g.player_color, m.played_uci, m.pla
        m.clock_secs, m.time_spent_secs,
        CASE WHEN g.player_color = 'white' THEN g.black ELSE g.white END,
        g.opening, g.time_control, g.date, g.url,
-       (SELECT group_concat(tag, ',') FROM mistake_tags t WHERE t.mistake_id = m.id)
+       (SELECT group_concat(tag, ',') FROM mistake_tags t WHERE t.mistake_id = m.id),
+       m.second_uci, m.second_cp
 FROM mistakes m JOIN games g ON g.id = m.game_id
 "#;
 
@@ -227,6 +259,8 @@ fn row_to_mistake(r: &rusqlite::Row) -> rusqlite::Result<Mistake> {
         tags: tags
             .map(|t| t.split(',').map(|s| s.to_string()).collect())
             .unwrap_or_default(),
+        second_uci: r.get(27)?,
+        second_cp: r.get(28)?,
     })
 }
 
@@ -237,6 +271,7 @@ impl Store {
         }
         let conn = Connection::open(path)?;
         conn.execute_batch(SCHEMA)?;
+        migrate(&conn)?;
         Ok(Self { conn })
     }
 
@@ -244,6 +279,7 @@ impl Store {
     pub fn open_in_memory() -> TResult<Self> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(SCHEMA)?;
+        migrate(&conn)?;
         Ok(Self { conn })
     }
 
@@ -259,11 +295,12 @@ impl Store {
         let tx = self.conn.unchecked_transaction()?;
         tx.execute(
             "INSERT OR REPLACE INTO games (id, player_color, white, black, white_elo, black_elo, result,
-                date, time_control, opening, eco, url, plies, engine, depth)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+                date, time_control, opening, eco, url, plies, engine, depth, start_fen, moves_uci)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
             params![
                 g.id, g.player_color, g.white, g.black, g.white_elo, g.black_elo, g.result, g.date,
-                g.time_control, g.opening, g.eco, g.url, g.plies, g.engine, g.depth
+                g.time_control, g.opening, g.eco, g.url, g.plies, g.engine, g.depth, g.start_fen,
+                g.moves_uci
             ],
         )?;
         for m in mistakes {
@@ -272,8 +309,8 @@ impl Store {
                 "INSERT INTO mistakes (game_id, ply, fen_before, played_uci, played_san, best_uci,
                     best_san, best_line, best_line_uci, refutation_line, refutation_uci,
                     eval_before_cp, eval_after_cp, win_before, win_after, win_drop, severity, phase,
-                    moved_role, clock_secs, time_spent_secs)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
+                    moved_role, clock_secs, time_spent_secs, second_uci, second_cp)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)",
                 params![
                     g.id,
                     m.ply,
@@ -296,6 +333,8 @@ impl Store {
                     d.moved_role,
                     m.clock_secs.map(|v| v as f64),
                     d.time_spent_secs.map(|v| v as f64),
+                    m.second.as_ref().map(|x| x.0.clone()),
+                    m.second.as_ref().map(|x| x.1),
                 ],
             )?;
             let id = tx.last_insert_rowid();
@@ -308,6 +347,32 @@ impl Store {
         }
         tx.commit()?;
         Ok(())
+    }
+
+    /// Fill in moves for games analysed before Drills v2 (no engine work needed).
+    pub fn backfill_game_moves(&self, id: &str, start_fen: Option<&str>, moves_uci: &str) -> TResult<()> {
+        self.conn.execute(
+            "UPDATE games SET start_fen = ?2, moves_uci = ?3 WHERE id = ?1 AND moves_uci IS NULL",
+            params![id, start_fen, moves_uci],
+        )?;
+        Ok(())
+    }
+
+    pub fn mistake_context(&self, mistake_id: i64) -> TResult<super::MistakeContext> {
+        let row: Option<(u32, Option<String>, Option<String>)> = self
+            .conn
+            .query_row(
+                "SELECT m.ply, g.start_fen, g.moves_uci FROM mistakes m JOIN games g ON g.id = m.game_id
+                 WHERE m.id = ?1",
+                [mistake_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        let Some((ply, start_fen, Some(moves))) = row else {
+            return Ok(Default::default());
+        };
+        let moves: Vec<String> = moves.split_whitespace().map(|s| s.to_string()).collect();
+        Ok(super::features::game_context(start_fen.as_deref(), &moves, ply as usize))
     }
 
     pub fn get_mistake(&self, id: i64) -> TResult<Option<Mistake>> {
@@ -673,6 +738,34 @@ mod tests {
     use crate::training::features::*;
 
     #[test]
+    fn migrates_build2_database() {
+        let path = std::env::temp_dir().join("coach_migrate_test.db");
+        let _ = std::fs::remove_file(&path);
+        {
+            let c = Connection::open(&path).unwrap();
+            // Build-2 era tables (without the Drills v2 columns).
+            c.execute_batch(
+                "CREATE TABLE games (id TEXT PRIMARY KEY, player_color TEXT NOT NULL, white TEXT, black TEXT,
+                   white_elo INTEGER, black_elo INTEGER, result TEXT, date TEXT, time_control TEXT, opening TEXT,
+                   eco TEXT, url TEXT, plies INTEGER, engine TEXT, depth INTEGER, analyzed_at TEXT);
+                 CREATE TABLE mistakes (id INTEGER PRIMARY KEY AUTOINCREMENT, game_id TEXT NOT NULL, ply INTEGER NOT NULL);
+                 INSERT INTO games (id, player_color) VALUES ('g1', 'white');",
+            )
+            .unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        store.backfill_game_moves("g1", None, "e2e4 e7e5").unwrap();
+        let moves: String = store
+            .conn
+            .query_row("SELECT moves_uci FROM games WHERE id='g1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(moves, "e2e4 e7e5");
+        // Re-opening is a no-op.
+        drop(store);
+        Store::open(&path).unwrap();
+    }
+
+    #[test]
     fn roundtrip_game_mistake_card_and_insight() {
         let pgn = "[White \"me\"]\n[Black \"you\"]\n[UTCDate \"2026.11.01\"]\n[TimeControl \"180+2\"]\n\n1. e4 e5 2. Nf3 Qg5 *\n";
         let g = &parse_pgn_str(pgn)[0];
@@ -710,6 +803,7 @@ mod tests {
                     detected: d,
                     best_line_uci: vec!["b8c6".into()],
                     refutation_uci: vec!["f3g5".into()],
+                    second: Some(("g8f6".into(), -40)),
                 }],
             )
             .unwrap();
@@ -727,6 +821,11 @@ mod tests {
         assert!(q[0].focus);
         assert!(q[0].card_json.is_none());
         assert_eq!(q[0].mistake.opponent, "me");
+        assert_eq!(q[0].mistake.second_uci.as_deref(), Some("g8f6"));
+        assert_eq!(q[0].mistake.second_cp, Some(-40));
+        let ctx = store.mistake_context(q[0].mistake.id).unwrap();
+        assert_eq!(ctx.prev_move_san.as_deref(), Some("Nf3"));
+        assert_eq!(ctx.game_continuation_san, vec!["Qg5"]);
 
         store.save_card(q[0].mistake.id, "{}", "2000-01-01T00:00:00.000Z", false).unwrap();
         let q = store.drill_queue(&[], 10, 5).unwrap();

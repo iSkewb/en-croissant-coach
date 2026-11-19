@@ -606,6 +606,54 @@ pub fn explain_facts(
     facts
 }
 
+/// Convert engine lines at `pos` into drill lines (adds SAN, maps mate to ±1000).
+pub fn to_drill_lines(pos: &Chess, lines: &[EvalLine]) -> Vec<super::DrillLine> {
+    lines
+        .iter()
+        .map(|l| super::DrillLine {
+            cp: to_cp(l.score),
+            mate: match l.score {
+                EngineScore::Mate(m) => Some(m),
+                EngineScore::Cp(_) => None,
+            },
+            pv_san: uci_line_to_san(pos, &l.pv, 10),
+            pv_uci: l.pv.clone(),
+        })
+        .collect()
+}
+
+pub fn parse_fen(fen: &str) -> Option<Chess> {
+    fen.parse::<Fen>().ok()?.into_position(CastlingMode::Standard).ok()
+}
+
+/// Context of the move at `ply` in a game: the opponent's previous move and the game's
+/// continuation from that ply.
+pub fn game_context(start_fen: Option<&str>, moves_uci: &[String], ply: usize) -> super::MistakeContext {
+    let mut ctx = super::MistakeContext {
+        start_fen: start_fen.map(|s| s.to_string()),
+        ..Default::default()
+    };
+    let Some(mut pos) = start_fen.map_or(Some(Chess::default()), parse_fen) else {
+        return ctx;
+    };
+    for (i, u) in moves_uci.iter().enumerate() {
+        let Some(m) = parse_uci(&pos, u) else { break };
+        let san = move_to_san(&pos, &m);
+        if i + 1 == ply {
+            ctx.prev_fen = Some(fen_of(&pos));
+            ctx.prev_move_uci = Some(u.clone());
+            ctx.prev_move_san = Some(san.clone());
+        }
+        if i >= ply && i < ply + 8 {
+            ctx.game_continuation_uci.push(u.clone());
+            ctx.game_continuation_san.push(san.clone());
+        }
+        ctx.all_moves_san.push(san);
+        pos.play_unchecked(m);
+    }
+    ctx
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -622,6 +670,16 @@ mod tests {
             score,
             pv: pv.iter().map(|s| s.to_string()).collect(),
         }
+    }
+
+    #[test]
+    fn context_finds_previous_move_and_continuation() {
+        let moves: Vec<String> = ["e2e4", "e7e5", "g1f3", "d8g5", "f3g5"].iter().map(|s| s.to_string()).collect();
+        let c = game_context(None, &moves, 3);
+        assert_eq!(c.prev_move_san.as_deref(), Some("Nf3"));
+        assert_eq!(c.game_continuation_san, vec!["Qg5", "Nxg5"]);
+        assert_eq!(c.all_moves_san.len(), 5);
+        assert!(c.prev_fen.unwrap().starts_with("rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w"));
     }
 
     #[test]

@@ -333,6 +333,9 @@ pub async fn analyze_parsed_game(
                 detected: d,
                 best_line_uci: lines_before[0].pv.clone(),
                 refutation_uci: line_after.map(|l| l.pv.clone()).unwrap_or_default(),
+                second: lines_before
+                    .get(1)
+                    .and_then(|l| l.pv.first().map(|u| (u.clone(), super::features::to_cp(l.score)))),
             });
         }
     }
@@ -367,7 +370,14 @@ pub async fn ingest_file(
             }
             Some((g, color))
         })
-        .filter(|(g, _)| !store.has_game(&g.id()).unwrap_or(false))
+        .filter(|(g, _)| {
+            let known = store.has_game(&g.id()).unwrap_or(false);
+            if known {
+                // Older analyses didn't store the moves; add them (cheap, no engine).
+                let _ = store.backfill_game_moves(&g.id(), g.start_fen.as_deref(), &g.moves_uci.join(" "));
+            }
+            !known
+        })
         .take(opts.max_games.unwrap_or(u32::MAX) as usize)
         .collect();
     summary.games_skipped = summary.games_seen - todo.len() as u32;
