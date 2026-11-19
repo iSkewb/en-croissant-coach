@@ -4,6 +4,7 @@ import {
   type Icon,
   IconChess,
   IconCpu,
+  IconSchool,
   IconDatabase,
   IconFiles,
   IconSettings,
@@ -47,6 +48,7 @@ const linksdata = [
     url: "/databases",
   },
   { icon: IconCpu, label: "Engines", url: "/engines" },
+  { icon: IconSchool, label: "Coach", url: "/coach" },
 ];
 
 export function SideBar() {

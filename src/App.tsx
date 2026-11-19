@@ -120,6 +120,8 @@ declare module "@tanstack/react-router" {
 }
 
 const checkForUpdates = async () => {
+  // Custom Coach build: never offer the official update, it would replace this version.
+  if (import.meta.env.VITE_COACH_BUILD !== "false") return;
   try {
     const update = await check();
     if (update) {

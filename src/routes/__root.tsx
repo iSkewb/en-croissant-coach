@@ -124,6 +124,11 @@ function RootLayout() {
   const updateInProgress = useRef(false);
   const checkForUpdates = useCallback(async () => {
     if (updateInProgress.current) return;
+    if (import.meta.env.VITE_COACH_BUILD !== "false") {
+      // Custom Coach build: official updates would overwrite the Coach features.
+      await message("Updates are turned off in this custom build. Rebuild from GitHub to update.");
+      return;
+    }
     updateInProgress.current = true;
     try {
       const update = await check();

@@ -18,6 +18,8 @@ mod pgn;
 mod progress;
 mod puzzle;
 mod sound;
+mod training;
+mod training_commands;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -187,7 +189,20 @@ fn main() {
             get_game_engine_logs,
             get_progress,
             clear_progress,
-            get_sound_server_port
+            get_sound_server_port,
+            training_commands::training_ingest,
+            training_commands::training_stats,
+            training_commands::training_mistakes,
+            training_commands::training_mistake,
+            training_commands::training_drill_queue,
+            training_commands::training_save_card,
+            training_commands::training_facts,
+            training_commands::training_explain,
+            training_commands::training_run_insights,
+            training_commands::training_latest_insight,
+            training_commands::training_get_settings,
+            training_commands::training_set_settings,
+            training_commands::training_tag_glossary
         ))
         .events(tauri_specta::collect_events!(
             BestMovesPayload,

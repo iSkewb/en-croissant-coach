@@ -28,6 +28,7 @@ import { useTranslation } from "react-i18next";
 import type { DatabaseInfo } from "@/bindings";
 import { commands, events } from "@/bindings";
 import { databaseConversionStateAtom, storedDatabasesDirAtom } from "@/state/atoms";
+import { autoAnalyzeAfterDownload } from "@/components/coach/autoAnalyze";
 import { downloadChessCom } from "@/utils/chess.com/api";
 import { getDatabases, query_games } from "@/utils/db";
 import { capitalize } from "@/utils/format";
@@ -228,6 +229,8 @@ export function AccountCard({
                     await convert(p, lastGameDate);
                     const dbPath = p.replace(".pgn", ".duckdb");
                     await commands.deleteEmptyGames(dbPath);
+                    // Coach: analyse the freshly downloaded games in the background.
+                    void autoAnalyzeAfterDownload({ username: title, site: type });
                   } catch (e) {
                     console.error(e);
                   } finally {

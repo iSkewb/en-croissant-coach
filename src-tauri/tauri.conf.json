@@ -39,7 +39,7 @@
       "resources/vision/": "vision/"
     },
     "targets": "all",
-    "createUpdaterArtifacts": "v1Compatible"
+    "createUpdaterArtifacts": false
   },
   "build": {
     "beforeDevCommand": "pnpm prepare:aix-extension && pnpm start-vite",
@@ -47,8 +47,8 @@
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420"
   },
-  "productName": "en-croissant",
-  "mainBinaryName": "en-croissant",
+  "productName": "En Croissant Coach",
+  "mainBinaryName": "en-croissant-coach",
   "identifier": "org.encroissant.app",
   "plugins": {
     "deep-link": {
