@@ -84,6 +84,16 @@ CREATE TABLE IF NOT EXISTS explanations (
     created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS ai_usage (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at    TEXT DEFAULT (datetime('now')),
+    kind          TEXT NOT NULL,
+    provider      TEXT NOT NULL,
+    model         TEXT NOT NULL,
+    input_tokens  INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS insights (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at        TEXT DEFAULT (datetime('now')),
@@ -609,6 +619,37 @@ impl Store {
             plan: get_list("plan"),
             progress_note: get_str("progress_note"),
         }))
+    }
+
+    pub fn log_usage(
+        &self,
+        kind: &str,
+        provider: &str,
+        model: &str,
+        input_tokens: u64,
+        output_tokens: u64,
+    ) -> TResult<()> {
+        self.conn.execute(
+            "INSERT INTO ai_usage (kind, provider, model, input_tokens, output_tokens)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![kind, provider, model, input_tokens as i64, output_tokens as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn usage_last_days(&self, days: u32) -> TResult<super::UsageSummary> {
+        Ok(self.conn.query_row(
+            "SELECT count(*), coalesce(sum(input_tokens),0), coalesce(sum(output_tokens),0)
+             FROM ai_usage WHERE created_at >= datetime('now', ?1)",
+            [format!("-{days} days")],
+            |r| {
+                Ok(super::UsageSummary {
+                    calls: r.get(0)?,
+                    input_tokens: r.get::<_, i64>(1)? as u32,
+                    output_tokens: r.get::<_, i64>(2)? as u32,
+                })
+            },
+        )?)
     }
 
     pub fn focus_tags(&self) -> TResult<Vec<String>> {

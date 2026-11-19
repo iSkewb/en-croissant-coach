@@ -96,9 +96,28 @@ export type IngestSummary = {
     insightRefreshed: boolean;
 };
 
+export type CoachProvider = "claudeCode" | "api";
+
 export type CoachSettingsView = {
+    provider: CoachProvider;
     hasApiKey: boolean;
     model: string;
+    claudePath: string | null;
+    detectedClaudePath: string | null;
+    explainModel: string;
+    insightModel: string;
+    autoInsightEvery: number;
+    usage7d: { calls: number; inputTokens: number; outputTokens: number };
+};
+
+export type CoachSettingsUpdate = {
+    provider: CoachProvider;
+    /** null keeps the saved key, "" removes it */
+    apiKey: string | null;
+    model: string;
+    claudePath: string | null;
+    explainModel: string;
+    insightModel: string;
     autoInsightEvery: number;
 };
 
@@ -126,8 +145,7 @@ export const training = {
     runInsights: () => invoke<Insight | null>("training_run_insights"),
     latestInsight: () => invoke<Insight | null>("training_latest_insight"),
     getSettings: () => invoke<CoachSettingsView>("training_get_settings"),
-    setSettings: (apiKey: string | null, model: string, autoInsightEvery: number) =>
-        invoke<void>("training_set_settings", { apiKey, model, autoInsightEvery }),
+    setSettings: (update: CoachSettingsUpdate) => invoke<void>("training_set_settings", { update }),
     tagGlossary: () => invoke<[string, string][]>("training_tag_glossary"),
 };
 

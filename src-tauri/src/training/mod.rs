@@ -12,6 +12,7 @@
 //! Everything in this folder is independent of Tauri so it can be unit tested on its own;
 //! the Tauri command layer lives in `crate::training_commands`.
 
+pub mod claude_code;
 pub mod coach;
 pub mod features;
 pub mod ingest;
@@ -196,11 +197,24 @@ pub struct Weakness {
     pub priority: u8,
 }
 
+/// Which service answers the coach's questions.
+pub const PROVIDER_CLAUDE_CODE: &str = "claudeCode";
+pub const PROVIDER_API: &str = "api";
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct CoachSettings {
+    /// "claudeCode" (uses your Claude subscription) or "api" (pay-per-use API key).
+    pub provider: String,
     pub api_key: Option<String>,
+    /// Model for the API provider.
     pub model: String,
+    /// Optional explicit path to claude.exe; auto-detected when empty.
+    pub claude_path: Option<String>,
+    /// Claude Code model for per-mistake explanations (cheap is fine).
+    pub explain_model: String,
+    /// Claude Code model for the cross-game pattern analysis.
+    pub insight_model: String,
     /// Re-run pattern analysis automatically after this many new mistakes (0 = never).
     pub auto_insight_every: u32,
 }
@@ -208,18 +222,51 @@ pub struct CoachSettings {
 impl Default for CoachSettings {
     fn default() -> Self {
         Self {
+            provider: PROVIDER_CLAUDE_CODE.to_string(),
             api_key: None,
             model: "claude-sonnet-5-5".to_string(),
-            auto_insight_every: 25,
+            claude_path: None,
+            explain_model: "haiku".to_string(),
+            insight_model: "sonnet".to_string(),
+            auto_insight_every: 40,
         }
     }
+}
+
+/// Token usage of coach calls over the last 7 days.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageSummary {
+    pub calls: u32,
+    pub input_tokens: u32,
+    pub output_tokens: u32,
 }
 
 /// What the UI is allowed to see about the settings (never the key itself).
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CoachSettingsView {
+    pub provider: String,
     pub has_api_key: bool,
     pub model: String,
+    pub claude_path: Option<String>,
+    /// Where Claude Code was found (None = not installed / not found).
+    pub detected_claude_path: Option<String>,
+    pub explain_model: String,
+    pub insight_model: String,
+    pub auto_insight_every: u32,
+    pub usage_7d: UsageSummary,
+}
+
+/// Settings update from the UI. `api_key`: None keeps the current key, Some("") removes it.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CoachSettingsUpdate {
+    pub provider: String,
+    pub api_key: Option<String>,
+    pub model: String,
+    pub claude_path: Option<String>,
+    pub explain_model: String,
+    pub insight_model: String,
     pub auto_insight_every: u32,
 }

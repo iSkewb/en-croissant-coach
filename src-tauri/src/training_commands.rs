@@ -12,8 +12,9 @@ use crate::{
     error::Error,
     progress::update_progress,
     training::{
-        coach, ingest, store::Store, CoachSettings, CoachSettingsView, DrillCard, IngestOptions,
-        IngestSummary, Insight, Mistake, MistakeFilter, TrainingError, TrainingStats,
+        claude_code, coach, coach::Backend, ingest, store::Store, CoachSettings,
+        CoachSettingsUpdate, CoachSettingsView, DrillCard, IngestOptions, IngestSummary, Insight,
+        Mistake, MistakeFilter, TrainingError, TrainingStats, PROVIDER_API,
     },
     AppState,
 };
@@ -67,11 +68,34 @@ fn save_settings(app: &tauri::AppHandle, s: &CoachSettings) -> Result<(), Error>
     Ok(())
 }
 
-fn require_key(s: &CoachSettings) -> Result<String, Error> {
-    s.api_key
-        .clone()
-        .filter(|k| !k.is_empty())
-        .ok_or_else(|| Error::Training("Add your Anthropic API key in Coach → Settings first.".into()))
+#[derive(Clone, Copy)]
+enum Task {
+    Explain,
+    Insight,
+}
+
+/// Pick the AI backend for a task from the settings.
+fn backend(s: &CoachSettings, task: Task) -> Result<Backend, Error> {
+    if s.provider == PROVIDER_API {
+        let key = s
+            .api_key
+            .clone()
+            .filter(|k| !k.is_empty())
+            .ok_or_else(|| Error::Training("Add your Anthropic API key in Coach → Settings first.".into()))?;
+        return Ok(Backend::Api { key, model: s.model.clone() });
+    }
+    let exe = claude_code::find_claude(s.claude_path.as_deref()).ok_or_else(|| {
+        Error::Training(
+            "Claude Code wasn't found. Install it (claude.com/claude-code), sign in once, \
+             or set its location in Coach → Settings."
+                .into(),
+        )
+    })?;
+    let model = match task {
+        Task::Explain => s.explain_model.clone(),
+        Task::Insight => s.insight_model.clone(),
+    };
+    Ok(Backend::ClaudeCode { exe, model })
 }
 
 /// Analyse new games from a downloaded PGN file. Cancel with `cancel_analysis("training_ingest")`.
@@ -114,7 +138,7 @@ pub async fn training_ingest(
     // Seamless personalisation: refresh the pattern analysis once enough new mistakes piled up.
     let settings = load_settings(&app)?;
     if settings.auto_insight_every > 0 && !summary.cancelled {
-        if let Ok(key) = require_key(&settings) {
+        if let Ok(b) = backend(&settings, Task::Insight) {
             let since_last = {
                 let store = Store::open(&db)?;
                 let now = store.serious_mistake_count()?;
@@ -122,7 +146,7 @@ pub async fn training_ingest(
                 now.saturating_sub(at_last)
             };
             if since_last >= settings.auto_insight_every {
-                match coach::analyze_patterns(&key, &settings.model, &db).await {
+                match coach::analyze_patterns(&b, &db).await {
                     Ok(_) => summary.insight_refreshed = true,
                     Err(e) => warn!("automatic coach insight failed: {e}"),
                 }
@@ -210,18 +234,16 @@ pub async fn training_explain(
             return Ok(t);
         }
     }
-    let s = load_settings(&app)?;
-    let key = require_key(&s)?;
-    Ok(coach::explain_mistake(&key, &s.model, &db, mistake_id).await?)
+    let b = backend(&load_settings(&app)?, Task::Explain)?;
+    Ok(coach::explain_mistake(&b, &db, mistake_id).await?)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn training_run_insights(app: tauri::AppHandle) -> Result<Option<Insight>, Error> {
     let db = db_path(&app)?;
-    let s = load_settings(&app)?;
-    let key = require_key(&s)?;
-    coach::analyze_patterns(&key, &s.model, &db).await?;
+    let b = backend(&load_settings(&app)?, Task::Insight)?;
+    coach::analyze_patterns(&b, &db).await?;
     Ok(Store::open(&db)?.latest_insight()?)
 }
 
@@ -235,20 +257,25 @@ pub async fn training_latest_insight(app: tauri::AppHandle) -> Result<Option<Ins
 #[specta::specta]
 pub async fn training_get_settings(app: tauri::AppHandle) -> Result<CoachSettingsView, Error> {
     let s = load_settings(&app)?;
+    let usage_7d = Store::open(&db_path(&app)?)?.usage_last_days(7)?;
     Ok(CoachSettingsView {
-        has_api_key: s.api_key.map(|k| !k.is_empty()).unwrap_or(false),
+        has_api_key: s.api_key.as_ref().map(|k| !k.is_empty()).unwrap_or(false),
+        detected_claude_path: claude_code::find_claude(s.claude_path.as_deref())
+            .map(|p| p.display().to_string()),
+        provider: s.provider,
         model: s.model,
+        claude_path: s.claude_path,
+        explain_model: s.explain_model,
+        insight_model: s.insight_model,
         auto_insight_every: s.auto_insight_every,
+        usage_7d,
     })
 }
 
-/// `api_key`: `None` keeps the current key, `Some("")` removes it.
 #[tauri::command]
 #[specta::specta]
 pub async fn training_set_settings(
-    api_key: Option<String>,
-    model: String,
-    auto_insight_every: u32,
+    update: CoachSettingsUpdate,
     app: tauri::AppHandle,
 ) -> Result<(), Error> {
     let p = settings_path(&app)?;
@@ -256,11 +283,15 @@ pub async fn training_set_settings(
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
         .unwrap_or_default();
-    if let Some(k) = api_key {
+    if let Some(k) = update.api_key {
         s.api_key = if k.trim().is_empty() { None } else { Some(k.trim().to_string()) };
     }
-    s.model = model;
-    s.auto_insight_every = auto_insight_every;
+    s.provider = update.provider;
+    s.model = update.model;
+    s.claude_path = update.claude_path.filter(|p| !p.trim().is_empty());
+    s.explain_model = update.explain_model;
+    s.insight_model = update.insight_model;
+    s.auto_insight_every = update.auto_insight_every;
     save_settings(&app, &s)
 }
 
