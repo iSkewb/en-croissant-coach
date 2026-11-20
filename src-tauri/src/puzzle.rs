@@ -130,6 +130,59 @@ pub fn get_puzzle(
     cache.get_next_puzzle().ok_or(Error::NoPuzzles)
 }
 
+/// SQL for puzzles in a rating range that carry ANY of `n_themes` themes (Coach).
+pub(crate) fn themed_puzzles_sql(n_themes: usize) -> String {
+    let mut sql = String::from(
+        "SELECT p.id, p.fen, p.moves, p.rating FROM puzzles p WHERE p.rating BETWEEN ? AND ?",
+    );
+    if n_themes > 0 {
+        let marks = vec!["?"; n_themes].join(", ");
+        sql.push_str(&format!(
+            " AND EXISTS (SELECT 1 FROM puzzle_themes pt JOIN themes t ON t.id = pt.theme_id
+               WHERE pt.puzzle_id = p.id AND t.name IN ({marks}))"
+        ));
+    }
+    sql.push_str(" ORDER BY random() LIMIT ?");
+    sql
+}
+
+/// Puzzles (id, fen, moves, rating, themes) matching any of `themes` (Coach).
+pub(crate) fn themed_puzzles(
+    file: &str,
+    themes: &[String],
+    min_rating: i32,
+    max_rating: i32,
+    limit: i64,
+) -> Result<Vec<(i64, String, String, i32, Vec<String>)>, Error> {
+    let db = open_database(Path::new(file))?;
+    let mut stmt = db.prepare(&themed_puzzles_sql(themes.len()))?;
+    let mut args: Vec<Box<dyn duckdb::ToSql>> = vec![Box::new(min_rating), Box::new(max_rating)];
+    for t in themes {
+        args.push(Box::new(t.clone()));
+    }
+    args.push(Box::new(limit));
+    let rows = stmt.query_map(duckdb::params_from_iter(args.iter().map(|b| b.as_ref())), |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, i32>(3)?,
+        ))
+    })?;
+    let puzzles: Vec<(i64, String, String, i32)> = rows.collect::<Result<_, _>>()?;
+
+    // Themes for just the chosen puzzles (cheaper than aggregating in the random scan).
+    let mut themes_stmt = db.prepare(
+        "SELECT t.name FROM themes t JOIN puzzle_themes pt ON t.id = pt.theme_id WHERE pt.puzzle_id = ?",
+    )?;
+    let mut out = Vec::with_capacity(puzzles.len());
+    for (id, fen, moves, rating) in puzzles {
+        let names = themes_stmt.query_map(params![id], |r| r.get::<_, String>(0))?;
+        out.push((id, fen, moves, rating, names.collect::<Result<_, _>>()?));
+    }
+    Ok(out)
+}
+
 #[derive(Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PuzzleDatabaseInfo {

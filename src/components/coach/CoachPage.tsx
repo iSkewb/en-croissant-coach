@@ -16,7 +16,7 @@ import {
   Text,
   Title,
 } from "@mantine/core";
-import { IconRefresh, IconSparkles, IconTarget } from "@tabler/icons-react";
+import { IconPuzzle, IconRefresh, IconSparkles, IconTarget } from "@tabler/icons-react";
 import { useCallback, useEffect, useState } from "react";
 import { events } from "@/bindings";
 import {
@@ -29,6 +29,7 @@ import {
   training,
 } from "@/utils/training";
 import { analyzeAccount, connectedAccounts } from "./autoAnalyze";
+import CoachPuzzles, { type PracticeTarget } from "./CoachPuzzles";
 import CoachSettings from "./CoachSettings";
 import { MistakeDetail } from "./MistakeDetail";
 import MistakeDrill from "./MistakeDrill";
@@ -138,10 +139,12 @@ function InsightCard({
   insight,
   onOpenMistake,
   onRefreshed,
+  onPractice,
 }: {
   insight: Insight | null;
   onOpenMistake: (id: number) => void;
   onRefreshed: () => void;
+  onPractice: (t: PracticeTarget) => void;
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -224,6 +227,19 @@ function InsightCard({
                         </Badge>
                       ))}
                     </Group>
+                    {w.puzzleThemes.length > 0 && (
+                      <Group>
+                        <Button
+                          size="compact-xs"
+                          variant="light"
+                          color="grape"
+                          leftSection={<IconPuzzle size="0.8rem" />}
+                          onClick={() => onPractice({ title: w.title, themes: w.puzzleThemes })}
+                        >
+                          Practice with puzzles
+                        </Button>
+                      </Group>
+                    )}
                     {w.mistakeIds.length > 0 && (
                       <Group gap={4}>
                         <Text size="xs" c="dimmed">
@@ -318,11 +334,13 @@ function Overview({
   insight,
   reload,
   openMistake,
+  onPractice,
 }: {
   stats: TrainingStats | null;
   insight: Insight | null;
   reload: () => void;
   openMistake: (id: number) => void;
+  onPractice: (t: PracticeTarget) => void;
 }) {
   // Exclude pure context tags from the "what goes wrong" chart.
   const contextTags = new Set(["was_winning", "was_losing", "time_pressure", "rushed"]);
@@ -343,7 +361,12 @@ function Overview({
           hint={`${stats?.cardsTotal ?? 0} in deck`}
         />
       </SimpleGrid>
-      <InsightCard insight={insight} onOpenMistake={openMistake} onRefreshed={reload} />
+      <InsightCard
+        insight={insight}
+        onOpenMistake={openMistake}
+        onRefreshed={reload}
+        onPractice={onPractice}
+      />
       <SimpleGrid cols={{ base: 1, md: 2 }}>
         <CountBars
           title="What goes wrong"
@@ -472,6 +495,14 @@ export default function CoachPage() {
   const [insight, setInsight] = useState<Insight | null>(null);
   const [selected, setSelected] = useState<Mistake | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [tab, setTab] = useState<string | null>("overview");
+  const [practice, setPractice] = useState<PracticeTarget | null>(null);
+  const clearPractice = useCallback(() => setPractice(null), []);
+
+  function startPractice(t: PracticeTarget) {
+    setPractice(t);
+    setTab("puzzles");
+  }
 
   const reload = useCallback(() => {
     training
@@ -496,12 +527,13 @@ export default function CoachPage() {
     <Stack p="md" h="100%">
       <Title order={2}>Coach</Title>
       {loadError && <Alert color="red">{loadError}</Alert>}
-      <Tabs defaultValue="overview" keepMounted={false}>
+      <Tabs value={tab} onChange={setTab} keepMounted={false}>
         <Tabs.List>
           <Tabs.Tab value="overview">Overview</Tabs.Tab>
           <Tabs.Tab value="drill">
             Drill{stats && stats.cardsDue > 0 ? ` (${stats.cardsDue})` : ""}
           </Tabs.Tab>
+          <Tabs.Tab value="puzzles">Puzzles</Tabs.Tab>
           <Tabs.Tab value="mistakes">Mistakes</Tabs.Tab>
           <Tabs.Tab value="settings">Settings</Tabs.Tab>
         </Tabs.List>
@@ -512,7 +544,11 @@ export default function CoachPage() {
               insight={insight}
               reload={reload}
               openMistake={openMistakeById}
+              onPractice={startPractice}
             />
+          </Tabs.Panel>
+          <Tabs.Panel value="puzzles">
+            <CoachPuzzles insight={insight} initialTarget={practice} onTargetUsed={clearPractice} />
           </Tabs.Panel>
           <Tabs.Panel value="drill">
             <MistakeDrill onChange={reload} />

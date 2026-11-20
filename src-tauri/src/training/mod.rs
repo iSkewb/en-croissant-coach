@@ -300,3 +300,50 @@ pub struct MistakeContext {
     pub start_fen: Option<String>,
     pub all_moves_san: Vec<String>,
 }
+
+/// A puzzle from the Lichess puzzle database. `moves[0]` is the opponent's move that sets
+/// up the puzzle; you play `moves[1]`, `moves[3]`, ...
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CoachPuzzle {
+    pub id: i64,
+    pub fen: String,
+    pub moves: Vec<String>,
+    pub rating: i32,
+    pub themes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PuzzleAttempt {
+    pub puzzle_id: i64,
+    pub rating: i32,
+    pub themes: Vec<String>,
+    /// Coach weakness title this session was started from, if any.
+    pub weakness: Option<String>,
+    /// Solved on the first try without hints.
+    pub solved: bool,
+    pub hints: u32,
+    pub seconds: f32,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeStat {
+    pub theme: String,
+    pub attempts: u32,
+    pub solved: u32,
+    /// Same, for the last 7 days.
+    pub recent_attempts: u32,
+    pub recent_solved: u32,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PuzzleProfile {
+    /// Coach puzzle rating (Elo, updated after every attempt).
+    pub rating: i32,
+    pub attempts: u32,
+    pub solved: u32,
+    pub theme_stats: Vec<ThemeStat>,
+}

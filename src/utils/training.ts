@@ -89,6 +89,40 @@ export type MistakeContext = {
     allMovesSan: string[];
 };
 
+export type CoachPuzzle = {
+    id: number;
+    fen: string;
+    /** moves[0] is the opponent's setup move; you play moves[1], moves[3], ... */
+    moves: string[];
+    rating: number;
+    themes: string[];
+};
+
+export type PuzzleAttempt = {
+    puzzleId: number;
+    rating: number;
+    themes: string[];
+    weakness: string | null;
+    solved: boolean;
+    hints: number;
+    seconds: number;
+};
+
+export type ThemeStat = {
+    theme: string;
+    attempts: number;
+    solved: number;
+    recentAttempts: number;
+    recentSolved: number;
+};
+
+export type PuzzleProfile = {
+    rating: number;
+    attempts: number;
+    solved: number;
+    themeStats: ThemeStat[];
+};
+
 export type DrillCard = { mistake: Mistake; cardJson: string | null; focus: boolean };
 
 export type IngestOptions = {
@@ -152,6 +186,23 @@ export const training = {
         invoke<DrillLine[]>("training_analyse", { enginePath, fen, depth, multipv }),
     mistakeContext: (mistakeId: number) =>
         invoke<MistakeContext>("training_mistake_context", { mistakeId }),
+    themedPuzzles: (
+        file: string,
+        themes: string[],
+        minRating: number,
+        maxRating: number,
+        count = 10,
+    ) =>
+        invoke<CoachPuzzle[]>("training_themed_puzzles", {
+            file,
+            themes,
+            minRating,
+            maxRating,
+            count,
+        }),
+    recordPuzzle: (attempt: PuzzleAttempt) =>
+        invoke<PuzzleProfile>("training_record_puzzle", { attempt }),
+    puzzleProfile: () => invoke<PuzzleProfile>("training_puzzle_profile"),
     mistake: (id: number) => invoke<Mistake | null>("training_mistake", { id }),
     drillQueue: (limit = 20, newLimit = 10) =>
         invoke<DrillCard[]>("training_drill_queue", { limit, newLimit }),

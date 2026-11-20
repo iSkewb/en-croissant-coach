@@ -14,8 +14,8 @@ use crate::{
     training::{
         claude_code, coach, coach::Backend, features, ingest, store::Store, uci::UciEngine,
         CoachSettings, CoachSettingsUpdate, CoachSettingsView, DrillCard, DrillLine, IngestOptions,
-        IngestSummary, Insight, Mistake, MistakeContext, MistakeFilter, TrainingError,
-        TrainingStats, PROVIDER_API,
+        CoachPuzzle, IngestSummary, Insight, Mistake, MistakeContext, MistakeFilter,
+        PuzzleAttempt, PuzzleProfile, TrainingError, TrainingStats, PROVIDER_API,
     },
     AppState,
 };
@@ -349,4 +349,54 @@ pub async fn training_mistake_context(
     app: tauri::AppHandle,
 ) -> Result<MistakeContext, Error> {
     Ok(Store::open(&db_path(&app)?)?.mistake_context(mistake_id)?)
+}
+
+/// Puzzles for a coach weakness: any of `themes`, within `[min_rating, max_rating]`,
+/// skipping puzzles you've already attempted in the Coach.
+#[tauri::command]
+#[specta::specta]
+pub async fn training_themed_puzzles(
+    file: String,
+    themes: Vec<String>,
+    min_rating: i32,
+    max_rating: i32,
+    count: u32,
+    app: tauri::AppHandle,
+) -> Result<Vec<CoachPuzzle>, Error> {
+    let seen = Store::open(&db_path(&app)?)?.attempted_puzzle_ids()?;
+    let want = count.clamp(1, 50) as usize;
+    let rows = tokio::task::spawn_blocking(move || {
+        crate::puzzle::themed_puzzles(&file, &themes, min_rating, max_rating, (want * 3) as i64)
+    })
+    .await
+    .map_err(|e| Error::Training(e.to_string()))??;
+    Ok(rows
+        .into_iter()
+        .filter(|r| !seen.contains(&r.0))
+        .take(want)
+        .map(|(id, fen, moves, rating, themes)| CoachPuzzle {
+            id,
+            fen,
+            moves: moves.split_whitespace().map(|m| m.to_string()).collect(),
+            rating,
+            themes,
+        })
+        .collect())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn training_record_puzzle(
+    attempt: PuzzleAttempt,
+    app: tauri::AppHandle,
+) -> Result<PuzzleProfile, Error> {
+    let store = Store::open(&db_path(&app)?)?;
+    store.record_puzzle_attempt(&attempt)?;
+    Ok(store.puzzle_profile()?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn training_puzzle_profile(app: tauri::AppHandle) -> Result<PuzzleProfile, Error> {
+    Ok(Store::open(&db_path(&app)?)?.puzzle_profile()?)
 }

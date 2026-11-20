@@ -338,13 +338,31 @@ pub async fn analyze_patterns(backend: &Backend, store_path: &Path) -> TResult<S
             "You coach a club player using stats over all their analysed games plus sample mistakes \
              (engine lines and verified facts). Find the 2-4 recurring weaknesses that cost the most, ranked. \
              Prefer behavioural root causes (e.g. 'stops checking threats after a capture', 'plays too fast \
-             when winning') over restating tags. Back every claim with numbers or example ids. Do not invent \
+             when winning') over restating tags. Back every claim with numbers or example ids. If puzzle \
+             results are given, use them in progress_note (improving or not per weakness). Do not invent \
              tactics beyond the facts. drill_tags must come from the tag list.\nTags:\n{}",
             glossary_for(stats.by_tag.iter().map(|r| r.key.as_str()))
         );
         let mut user = json!({ "stats": compact_stats(&stats), "examples": examples });
         if let Some(p) = previous {
             user["previous"] = p;
+        }
+        // Puzzle practice results per theme, so the coach can see whether weaknesses improve.
+        let profile = store.puzzle_profile()?;
+        if profile.attempts > 0 {
+            let themes: Map<String, Value> = profile
+                .theme_stats
+                .iter()
+                .take(8)
+                .map(|t| {
+                    (
+                        t.theme.clone(),
+                        json!([t.attempts, t.solved, t.recent_attempts, t.recent_solved]),
+                    )
+                })
+                .collect();
+            user["puzzles[attempts,solved,7d_attempts,7d_solved]"] = Value::Object(themes);
+            user["puzzle_rating"] = json!(profile.rating);
         }
         (system, user.to_string(), stats.mistakes)
     };

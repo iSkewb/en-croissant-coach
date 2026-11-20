@@ -94,6 +94,19 @@ CREATE TABLE IF NOT EXISTS ai_usage (
     output_tokens INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS puzzle_attempts (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT DEFAULT (datetime('now')),
+    puzzle_id  INTEGER NOT NULL,
+    rating     INTEGER NOT NULL,
+    themes     TEXT NOT NULL,
+    weakness   TEXT,
+    solved     INTEGER NOT NULL,
+    hints      INTEGER NOT NULL,
+    seconds    REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_puzzle_attempts_pid ON puzzle_attempts(puzzle_id);
+
 CREATE TABLE IF NOT EXISTS insights (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at        TEXT DEFAULT (datetime('now')),
@@ -717,6 +730,97 @@ impl Store {
         )?)
     }
 
+    pub fn record_puzzle_attempt(&self, a: &super::PuzzleAttempt) -> TResult<()> {
+        self.conn.execute(
+            "INSERT INTO puzzle_attempts (puzzle_id, rating, themes, weakness, solved, hints, seconds)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                a.puzzle_id,
+                a.rating,
+                a.themes.join(","),
+                a.weakness,
+                a.solved as i32,
+                a.hints,
+                a.seconds as f64
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn attempted_puzzle_ids(&self) -> TResult<std::collections::HashSet<i64>> {
+        let mut stmt = self.conn.prepare("SELECT DISTINCT puzzle_id FROM puzzle_attempts")?;
+        let ids = stmt.query_map([], |r| r.get::<_, i64>(0))?;
+        Ok(ids.collect::<Result<_, _>>()?)
+    }
+
+    /// Your typical game rating (average of your last 20 analysed games), if known.
+    pub fn player_game_rating(&self) -> TResult<Option<i32>> {
+        let avg: Option<f64> = self.conn.query_row(
+            "SELECT avg(r) FROM (
+                SELECT CASE WHEN player_color = 'white' THEN white_elo ELSE black_elo END AS r
+                FROM games WHERE r IS NOT NULL ORDER BY date DESC LIMIT 20)",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(avg.map(|a| a.round() as i32))
+    }
+
+    /// Coach puzzle rating: Elo replayed over all attempts (K=40 for the first 20, then 24).
+    /// Starts from your game rating + 200 (Lichess puzzle ratings run higher), or 1500.
+    pub fn puzzle_profile(&self) -> TResult<super::PuzzleProfile> {
+        let start = self
+            .player_game_rating()?
+            .map(|r| (r + 200).clamp(800, 2800))
+            .unwrap_or(1500);
+        let mut rating = start as f64;
+        let mut attempts = 0u32;
+        let mut solved_total = 0u32;
+        {
+            let mut stmt =
+                self.conn.prepare("SELECT rating, solved FROM puzzle_attempts ORDER BY id")?;
+            let rows = stmt.query_map([], |r| Ok((r.get::<_, i32>(0)?, r.get::<_, i32>(1)? != 0)))?;
+            for row in rows {
+                let (pr, solved) = row?;
+                let expected = 1.0 / (1.0 + 10f64.powf((pr as f64 - rating) / 400.0));
+                let k = if attempts < 20 { 40.0 } else { 24.0 };
+                rating += k * (if solved { 1.0 } else { 0.0 } - expected);
+                attempts += 1;
+                solved_total += solved as u32;
+            }
+        }
+
+        let mut by_theme: std::collections::BTreeMap<String, super::ThemeStat> = Default::default();
+        let mut stmt = self.conn.prepare(
+            "SELECT themes, solved, created_at >= datetime('now', '-7 days') FROM puzzle_attempts",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i32>(1)? != 0, r.get::<_, i32>(2)? != 0))
+        })?;
+        for row in rows {
+            let (themes, solved, recent) = row?;
+            for t in themes.split(',').filter(|t| !t.is_empty()) {
+                let e = by_theme.entry(t.to_string()).or_insert_with(|| super::ThemeStat {
+                    theme: t.to_string(),
+                    ..Default::default()
+                });
+                e.attempts += 1;
+                e.solved += solved as u32;
+                if recent {
+                    e.recent_attempts += 1;
+                    e.recent_solved += solved as u32;
+                }
+            }
+        }
+        let mut theme_stats: Vec<super::ThemeStat> = by_theme.into_values().collect();
+        theme_stats.sort_by(|a, b| b.attempts.cmp(&a.attempts));
+        Ok(super::PuzzleProfile {
+            rating: rating.round() as i32,
+            attempts,
+            solved: solved_total,
+            theme_stats,
+        })
+    }
+
     pub fn focus_tags(&self) -> TResult<Vec<String>> {
         Ok(self
             .latest_insight()?
@@ -736,6 +840,32 @@ mod tests {
     use super::*;
     use crate::training::ingest::parse_pgn_str;
     use crate::training::features::*;
+
+    #[test]
+    fn puzzle_attempts_update_rating_and_theme_stats() {
+        let store = Store::open_in_memory().unwrap();
+        let p0 = store.puzzle_profile().unwrap();
+        assert_eq!(p0.rating, 1500, "no games -> default start");
+        let attempt = |solved: bool, themes: &[&str]| crate::training::PuzzleAttempt {
+            puzzle_id: 7,
+            rating: 1500,
+            themes: themes.iter().map(|s| s.to_string()).collect(),
+            weakness: Some("Loose pieces".into()),
+            solved,
+            hints: 0,
+            seconds: 12.0,
+        };
+        store.record_puzzle_attempt(&attempt(true, &["fork", "middlegame"])).unwrap();
+        store.record_puzzle_attempt(&attempt(true, &["fork"])).unwrap();
+        store.record_puzzle_attempt(&attempt(false, &["hangingPiece"])).unwrap();
+        let p = store.puzzle_profile().unwrap();
+        assert_eq!(p.attempts, 3);
+        assert_eq!(p.solved, 2);
+        assert!(p.rating > 1500, "two wins vs one loss at equal rating raises rating: {}", p.rating);
+        let fork = p.theme_stats.iter().find(|t| t.theme == "fork").unwrap();
+        assert_eq!((fork.attempts, fork.solved, fork.recent_attempts), (2, 2, 2));
+        assert!(store.attempted_puzzle_ids().unwrap().contains(&7));
+    }
 
     #[test]
     fn migrates_build2_database() {
