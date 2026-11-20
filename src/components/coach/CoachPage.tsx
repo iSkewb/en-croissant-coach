@@ -29,6 +29,7 @@ import {
   training,
 } from "@/utils/training";
 import { analyzeAccount, connectedAccounts } from "./autoAnalyze";
+import CoachPlay from "./CoachPlay";
 import CoachPuzzles, { type PracticeTarget } from "./CoachPuzzles";
 import CoachSettings from "./CoachSettings";
 import { MistakeDetail } from "./MistakeDetail";
@@ -533,6 +534,7 @@ export default function CoachPage() {
           <Tabs.Tab value="drill">
             Drill{stats && stats.cardsDue > 0 ? ` (${stats.cardsDue})` : ""}
           </Tabs.Tab>
+          <Tabs.Tab value="play">Play</Tabs.Tab>
           <Tabs.Tab value="puzzles">Puzzles</Tabs.Tab>
           <Tabs.Tab value="mistakes">Mistakes</Tabs.Tab>
           <Tabs.Tab value="settings">Settings</Tabs.Tab>
@@ -546,6 +548,9 @@ export default function CoachPage() {
               openMistake={openMistakeById}
               onPractice={startPractice}
             />
+          </Tabs.Panel>
+          <Tabs.Panel value="play">
+            <CoachPlay />
           </Tabs.Panel>
           <Tabs.Panel value="puzzles">
             <CoachPuzzles insight={insight} initialTarget={practice} onTargetUsed={clearPractice} />

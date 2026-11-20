@@ -16,6 +16,7 @@ pub mod claude_code;
 pub mod coach;
 pub mod features;
 pub mod ingest;
+pub mod maia;
 pub mod store;
 pub mod uci;
 
@@ -346,4 +347,69 @@ pub struct PuzzleProfile {
     pub attempts: u32,
     pub solved: u32,
     pub theme_stats: Vec<ThemeStat>,
+}
+
+/// One finished game against Maia-3, sent from the Play screen.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MaiaGameRecord {
+    pub game_id: String,
+    /// Your colour: "white" | "black".
+    pub color: String,
+    /// Maia's level (Lichess blitz scale).
+    pub elo: i32,
+    /// From your point of view: "win" | "loss" | "draw".
+    pub result: String,
+    pub plies: u32,
+    pub opening: Option<String>,
+    pub hints: u32,
+    pub takebacks: u32,
+    pub time_control: Option<String>,
+    pub pgn: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MaiaLevelRow {
+    pub elo: i32,
+    pub games: u32,
+    pub wins: u32,
+    pub draws: u32,
+    pub losses: u32,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OpeningRow {
+    pub name: String,
+    /// Your colour in these games.
+    pub color: String,
+    pub games: u32,
+    /// Your score in percent (win = 1, draw = ½).
+    pub score: u32,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MaiaRecent {
+    pub date: String,
+    pub color: String,
+    pub elo: i32,
+    pub result: String,
+    pub opening: Option<String>,
+    pub game_id: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MaiaSummary {
+    pub games: u32,
+    pub wins: u32,
+    pub draws: u32,
+    pub losses: u32,
+    /// Level to play next (adapts to your recent results).
+    pub suggested_elo: i32,
+    pub by_level: Vec<MaiaLevelRow>,
+    pub openings: Vec<OpeningRow>,
+    pub recent: Vec<MaiaRecent>,
 }

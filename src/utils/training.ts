@@ -123,6 +123,41 @@ export type PuzzleProfile = {
     themeStats: ThemeStat[];
 };
 
+export type MaiaStatus = { installed: boolean; folder: string; model: string };
+
+export type MaiaGameRecord = {
+    gameId: string;
+    color: "white" | "black";
+    elo: number;
+    result: "win" | "loss" | "draw";
+    plies: number;
+    opening: string | null;
+    hints: number;
+    takebacks: number;
+    timeControl: string | null;
+    pgn: string;
+};
+
+export type MaiaSummary = {
+    games: number;
+    wins: number;
+    draws: number;
+    losses: number;
+    suggestedElo: number;
+    byLevel: { elo: number; games: number; wins: number; draws: number; losses: number }[];
+    openings: { name: string; color: string; games: number; score: number }[];
+    recent: {
+        date: string;
+        color: string;
+        elo: number;
+        result: string;
+        opening: string | null;
+        gameId: string;
+    }[];
+};
+
+export const MAIA_INSTALL_PROGRESS_ID = "maia_install";
+
 export type DrillCard = { mistake: Mistake; cardJson: string | null; focus: boolean };
 
 export type IngestOptions = {
@@ -203,6 +238,13 @@ export const training = {
     recordPuzzle: (attempt: PuzzleAttempt) =>
         invoke<PuzzleProfile>("training_record_puzzle", { attempt }),
     puzzleProfile: () => invoke<PuzzleProfile>("training_puzzle_profile"),
+    maiaStatus: () => invoke<MaiaStatus>("training_maia_status"),
+    maiaInstall: () => invoke<MaiaStatus>("training_maia_install"),
+    maiaUninstall: () => invoke<MaiaStatus>("training_maia_uninstall"),
+    maiaMove: (startFen: string, moves: string[], elo: number) =>
+        invoke<string | null>("training_maia_move", { startFen, moves, elo }),
+    maiaRecordGame: (game: MaiaGameRecord) => invoke<string>("training_maia_record_game", { game }),
+    maiaSummary: () => invoke<MaiaSummary>("training_maia_summary"),
     mistake: (id: number) => invoke<Mistake | null>("training_mistake", { id }),
     drillQueue: (limit = 20, newLimit = 10) =>
         invoke<DrillCard[]>("training_drill_queue", { limit, newLimit }),

@@ -107,6 +107,20 @@ CREATE TABLE IF NOT EXISTS puzzle_attempts (
 );
 CREATE INDEX IF NOT EXISTS idx_puzzle_attempts_pid ON puzzle_attempts(puzzle_id);
 
+CREATE TABLE IF NOT EXISTS maia_games (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at   TEXT DEFAULT (datetime('now')),
+    game_id      TEXT NOT NULL,
+    color        TEXT NOT NULL,
+    elo          INTEGER NOT NULL,
+    result       TEXT NOT NULL,
+    plies        INTEGER NOT NULL,
+    opening      TEXT,
+    hints        INTEGER NOT NULL,
+    takebacks    INTEGER NOT NULL,
+    time_control TEXT
+);
+
 CREATE TABLE IF NOT EXISTS insights (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at        TEXT DEFAULT (datetime('now')),
@@ -821,6 +835,100 @@ impl Store {
         })
     }
 
+    pub fn record_maia_game(&self, g: &super::MaiaGameRecord) -> TResult<()> {
+        self.conn.execute(
+            "INSERT INTO maia_games (game_id, color, elo, result, plies, opening, hints, takebacks, time_control)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                g.game_id, g.color, g.elo, g.result, g.plies, g.opening, g.hints, g.takebacks,
+                g.time_control
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn maia_summary(&self) -> TResult<super::MaiaSummary> {
+        let mut s = super::MaiaSummary::default();
+        let rows: Vec<(String, String, i32, String, Option<String>, String)> = {
+            let mut stmt = self.conn.prepare(
+                "SELECT created_at, color, elo, result, opening, game_id FROM maia_games ORDER BY id",
+            )?;
+            let it = stmt.query_map([], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
+            })?;
+            it.collect::<Result<_, _>>()?
+        };
+        let score = |res: &str| match res {
+            "win" => 1.0f32,
+            "draw" => 0.5,
+            _ => 0.0,
+        };
+        let mut levels: std::collections::BTreeMap<i32, super::MaiaLevelRow> = Default::default();
+        let mut openings: std::collections::HashMap<(String, String), (u32, f32)> = Default::default();
+        for (_, color, elo, result, opening, _) in &rows {
+            s.games += 1;
+            let l = levels.entry(*elo).or_insert_with(|| super::MaiaLevelRow { elo: *elo, ..Default::default() });
+            l.games += 1;
+            match result.as_str() {
+                "win" => {
+                    s.wins += 1;
+                    l.wins += 1
+                }
+                "draw" => {
+                    s.draws += 1;
+                    l.draws += 1
+                }
+                _ => {
+                    s.losses += 1;
+                    l.losses += 1
+                }
+            }
+            if let Some(o) = opening.as_ref().filter(|o| !o.is_empty()) {
+                let e = openings.entry((o.clone(), color.clone())).or_default();
+                e.0 += 1;
+                e.1 += score(result);
+            }
+        }
+        s.by_level = levels.into_values().collect();
+        let mut ops: Vec<super::OpeningRow> = openings
+            .into_iter()
+            .map(|((name, color), (games, pts))| super::OpeningRow {
+                name,
+                color,
+                games,
+                score: (pts / games as f32 * 100.0).round() as u32,
+            })
+            .collect();
+        ops.sort_by(|a, b| b.games.cmp(&a.games).then(a.name.cmp(&b.name)));
+        ops.truncate(12);
+        s.openings = ops;
+        s.recent = rows
+            .iter()
+            .rev()
+            .take(10)
+            .map(|(date, color, elo, result, opening, game_id)| super::MaiaRecent {
+                date: date.clone(),
+                color: color.clone(),
+                elo: *elo,
+                result: result.clone(),
+                opening: opening.clone(),
+                game_id: game_id.clone(),
+            })
+            .collect();
+        s.suggested_elo = match rows.last() {
+            None => super::maia::suggested_start_elo(self.player_game_rating()?),
+            Some((_, _, last_elo, ..)) => {
+                let at_level: Vec<f32> = rows
+                    .iter()
+                    .filter(|r| r.2 == *last_elo)
+                    .map(|r| score(&r.3))
+                    .collect();
+                super::maia::next_elo(*last_elo, &at_level)
+            }
+        };
+        Ok(s)
+    }
+
     pub fn focus_tags(&self) -> TResult<Vec<String>> {
         Ok(self
             .latest_insight()?
@@ -865,6 +973,34 @@ mod tests {
         let fork = p.theme_stats.iter().find(|t| t.theme == "fork").unwrap();
         assert_eq!((fork.attempts, fork.solved, fork.recent_attempts), (2, 2, 2));
         assert!(store.attempted_puzzle_ids().unwrap().contains(&7));
+    }
+
+    #[test]
+    fn maia_summary_levels_openings_and_adaptive_elo() {
+        let store = Store::open_in_memory().unwrap();
+        assert_eq!(store.maia_summary().unwrap().suggested_elo, 1100, "default start");
+        let rec = |result: &str, opening: &str, color: &str| crate::training::MaiaGameRecord {
+            game_id: format!("maia:{result}{opening}"),
+            color: color.into(),
+            elo: 1100,
+            result: result.into(),
+            plies: 40,
+            opening: Some(opening.into()),
+            hints: 0,
+            takebacks: 0,
+            time_control: None,
+            pgn: String::new(),
+        };
+        store.record_maia_game(&rec("win", "Italian Game", "white")).unwrap();
+        store.record_maia_game(&rec("loss", "Sicilian Defense", "black")).unwrap();
+        store.record_maia_game(&rec("win", "Italian Game", "white")).unwrap();
+        let s = store.maia_summary().unwrap();
+        assert_eq!((s.games, s.wins, s.losses), (3, 2, 1));
+        assert_eq!(s.suggested_elo, 1150, "2 of last 3 at 1100 -> step up");
+        assert_eq!(s.openings[0].name, "Italian Game");
+        assert_eq!((s.openings[0].games, s.openings[0].score), (2, 100));
+        assert_eq!(s.by_level[0].elo, 1100);
+        assert_eq!(s.recent[0].result, "win");
     }
 
     #[test]

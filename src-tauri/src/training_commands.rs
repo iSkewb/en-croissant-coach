@@ -14,7 +14,9 @@ use crate::{
     training::{
         claude_code, coach, coach::Backend, features, ingest, store::Store, uci::UciEngine,
         CoachSettings, CoachSettingsUpdate, CoachSettingsView, DrillCard, DrillLine, IngestOptions,
-        CoachPuzzle, IngestSummary, Insight, Mistake, MistakeContext, MistakeFilter,
+        maia::{self, MaiaPaths, MaiaStatus},
+        CoachPuzzle, IngestSummary, Insight, MaiaGameRecord, MaiaSummary, Mistake,
+        MistakeContext, MistakeFilter,
         PuzzleAttempt, PuzzleProfile, TrainingError, TrainingStats, PROVIDER_API,
     },
     AppState,
@@ -399,4 +401,130 @@ pub async fn training_record_puzzle(
 #[specta::specta]
 pub async fn training_puzzle_profile(app: tauri::AppHandle) -> Result<PuzzleProfile, Error> {
     Ok(Store::open(&db_path(&app)?)?.puzzle_profile()?)
+}
+
+// ---------------------------------------------------------------------------------------
+// Maia-3: human-like opponent
+// ---------------------------------------------------------------------------------------
+
+pub const MAIA_INSTALL_PROGRESS_ID: &str = "maia_install";
+
+fn maia_paths(app: &tauri::AppHandle) -> Result<MaiaPaths, Error> {
+    Ok(MaiaPaths::new(data_dir(app)?.join("coach").join("maia3")))
+}
+
+/// The running Maia-3 engine and the Elo it's currently set to.
+static MAIA_ENGINE: once_cell::sync::Lazy<tokio::sync::Mutex<Option<(i32, UciEngine)>>> =
+    once_cell::sync::Lazy::new(|| tokio::sync::Mutex::new(None));
+
+#[tauri::command]
+#[specta::specta]
+pub async fn training_maia_status(app: tauri::AppHandle) -> Result<MaiaStatus, Error> {
+    Ok(maia_paths(&app)?.status())
+}
+
+/// One-time setup (uv → private Python → torch + Maia-3 → model → smoke test).
+/// Progress is reported on the "maia_install" progress id.
+#[tauri::command]
+#[specta::specta]
+pub async fn training_maia_install(
+    state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<MaiaStatus, Error> {
+    let paths = maia_paths(&app)?;
+    let progress_app = app.clone();
+    let result = maia::install(&paths, &maia::InstallSpec::default(), move |p, _msg| {
+        let st = progress_app.state::<AppState>();
+        let _ = update_progress(
+            &st.progress_state,
+            &progress_app,
+            MAIA_INSTALL_PROGRESS_ID.to_string(),
+            p,
+            false,
+        );
+    })
+    .await;
+    update_progress(
+        &state.progress_state,
+        &app,
+        MAIA_INSTALL_PROGRESS_ID.to_string(),
+        100.0,
+        true,
+    )?;
+    result?;
+    Ok(paths.status())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn training_maia_uninstall(app: tauri::AppHandle) -> Result<MaiaStatus, Error> {
+    if let Some((_, e)) = MAIA_ENGINE.lock().await.take() {
+        e.quit().await;
+    }
+    let paths = maia_paths(&app)?;
+    if paths.root.exists() {
+        std::fs::remove_dir_all(&paths.root)?;
+    }
+    Ok(paths.status())
+}
+
+/// Maia-3's move at `elo` (Lichess blitz scale) for the position after `moves` from `start_fen`.
+#[tauri::command]
+#[specta::specta]
+pub async fn training_maia_move(
+    start_fen: String,
+    moves: Vec<String>,
+    elo: i32,
+    app: tauri::AppHandle,
+) -> Result<Option<String>, Error> {
+    let paths = maia_paths(&app)?;
+    if !paths.status().installed {
+        return Err(Error::Training("Set up the human-like opponent first.".into()));
+    }
+    let mut guard = MAIA_ENGINE.lock().await;
+    if guard.is_none() {
+        let e = UciEngine::spawn_with(&paths.engine().display().to_string(), &paths.engine_args(), &[]).await?;
+        *guard = Some((-1, e));
+    }
+    let (current_elo, engine) = guard.as_mut().expect("engine just set");
+    let elo = elo.clamp(600, 2600);
+    if *current_elo != elo {
+        // Maia plays as `elo` and assumes an opponent of similar strength.
+        engine.set_option("SelfElo", &elo.to_string()).await?;
+        engine.set_option("OppoElo", &elo.to_string()).await?;
+        *current_elo = elo;
+    }
+    match engine.best_move(&start_fen, &moves, "nodes 1").await {
+        Ok(m) => Ok(m),
+        Err(e) => {
+            *guard = None;
+            Err(e.into())
+        }
+    }
+}
+
+/// Save a finished game: stats row + appended to the Coach's PGN file (returned path),
+/// which the frontend then runs through the normal mistake analysis.
+#[tauri::command]
+#[specta::specta]
+pub async fn training_maia_record_game(
+    game: MaiaGameRecord,
+    app: tauri::AppHandle,
+) -> Result<String, Error> {
+    let store = Store::open(&db_path(&app)?)?;
+    store.record_maia_game(&game)?;
+    let pgn_path = data_dir(&app)?.join("coach").join("maia-games.pgn");
+    if let Some(dir) = pgn_path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    use std::io::Write;
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&pgn_path)?;
+    writeln!(f, "{}\n", game.pgn.trim())?;
+    Ok(pgn_path.display().to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn training_maia_summary(app: tauri::AppHandle) -> Result<MaiaSummary, Error> {
+    Ok(Store::open(&db_path(&app)?)?.maia_summary()?)
 }

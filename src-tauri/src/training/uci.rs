@@ -19,11 +19,26 @@ pub struct UciEngine {
 
 impl UciEngine {
     pub async fn spawn(path: &str, threads: u32, hash_mb: u32) -> TResult<Self> {
+        let mut e = Self::spawn_with(path, &[], &[]).await?;
+        e.send(&format!("setoption name Threads value {}", threads.max(1))).await?;
+        e.send(&format!("setoption name Hash value {}", hash_mb.max(16))).await?;
+        e.send("ucinewgame").await?;
+        e.ready().await?;
+        Ok(e)
+    }
+
+    /// Start any UCI engine with extra arguments and environment variables
+    /// (used for Maia-3, which runs from a Python environment).
+    pub async fn spawn_with(path: &str, args: &[String], envs: &[(String, String)]) -> TResult<Self> {
         let mut cmd = Command::new(path);
-        cmd.stdin(Stdio::piped())
+        cmd.args(args)
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .kill_on_drop(true);
+        for (k, v) in envs {
+            cmd.env(k, v);
+        }
         if let Some(dir) = std::path::Path::new(path).parent() {
             if dir.is_dir() {
                 cmd.current_dir(dir);
@@ -43,11 +58,34 @@ impl UciEngine {
         };
         e.send("uci").await?;
         e.wait_for("uciok").await?;
-        e.send(&format!("setoption name Threads value {}", threads.max(1))).await?;
-        e.send(&format!("setoption name Hash value {}", hash_mb.max(16))).await?;
-        e.send("ucinewgame").await?;
-        e.ready().await?;
         Ok(e)
+    }
+
+    pub async fn set_option(&mut self, name: &str, value: &str) -> TResult<()> {
+        self.send(&format!("setoption name {name} value {value}")).await
+    }
+
+    pub async fn new_game(&mut self) -> TResult<()> {
+        self.send("ucinewgame").await?;
+        self.ready().await
+    }
+
+    /// Ask for a move with `go <limit>` (e.g. "nodes 1") and return the bestmove in UCI.
+    pub async fn best_move(&mut self, start_fen: &str, moves: &[String], limit: &str) -> TResult<Option<String>> {
+        let mut pos_cmd = format!("position fen {start_fen}");
+        if !moves.is_empty() {
+            pos_cmd.push_str(" moves ");
+            pos_cmd.push_str(&moves.join(" "));
+        }
+        self.send(&pos_cmd).await?;
+        self.send(&format!("go {limit}")).await?;
+        while let Some(line) = self.lines.next_line().await? {
+            if let Some(rest) = line.strip_prefix("bestmove") {
+                let mv = rest.split_whitespace().next().unwrap_or("");
+                return Ok((!mv.is_empty() && mv != "0000" && mv != "(none)").then(|| mv.to_string()));
+            }
+        }
+        msg("engine exited while thinking")
     }
 
     async fn send(&mut self, cmd: &str) -> TResult<()> {
@@ -66,7 +104,7 @@ impl UciEngine {
         msg(format!("engine exited while waiting for {token}"))
     }
 
-    async fn ready(&mut self) -> TResult<()> {
+    pub async fn ready(&mut self) -> TResult<()> {
         self.send("isready").await?;
         self.wait_for("readyok").await
     }

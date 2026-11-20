@@ -56,3 +56,19 @@ export async function autoAnalyzeAfterDownload(acc: AccountRef) {
         console.error("Coach auto-analysis failed", e);
     }
 }
+
+/** Analyse a PGN file the Coach wrote itself (e.g. games against Maia), as player `player`. */
+export async function analyzePgnFile(file: string, player: string): Promise<IngestSummary | null> {
+    const settings = getDefaultStore().get(coachIngestSettingsAtom);
+    const engine = pickEngine(settings.engineId);
+    if (!engine) return null;
+    return training.ingest(file, {
+        enginePath: engine.path,
+        player,
+        depth: settings.depth,
+        threads: settings.threads,
+        hashMb: settings.hashMb,
+        maxGames: null,
+        minPlies: 10,
+    });
+}
