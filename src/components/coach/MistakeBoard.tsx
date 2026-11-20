@@ -48,7 +48,10 @@ export function MistakeBoard({
           orientation={orientation}
           turnColor={turn}
           coordinates
-          viewOnly={!onMove}
+          // Never use viewOnly here: chessground only attaches its mouse/touch listeners when
+          // the board is created, so a board that starts view-only can never be moved later.
+          // Moves are blocked instead by leaving movable.color unset when onMove is missing.
+          viewOnly={false}
           animation={{ enabled: true }}
           drawable={{ enabled: true, visible: true, autoShapes: allShapes }}
           movable={{
