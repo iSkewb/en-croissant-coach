@@ -5,6 +5,7 @@ import {
   IconFileText,
   IconInfoCircle,
   IconNotes,
+  IconSchool,
   IconTargetArrow,
   IconZoomCheck,
 } from "@tabler/icons-react";
@@ -15,6 +16,7 @@ import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
+import CoachPanel from "@/components/panels/coach/CoachPanel";
 import {
   allEnabledAtom,
   autoSaveAtom,
@@ -262,6 +264,9 @@ function BoardAnalysis() {
               <Tabs.Tab value="analysis" leftSection={<IconZoomCheck size="1rem" />}>
                 {t("Board.Tabs.Analysis")}
               </Tabs.Tab>
+              <Tabs.Tab value="coach" leftSection={<IconSchool size="1rem" />}>
+                {t("Board.Tabs.Coach")}
+              </Tabs.Tab>
               <Tabs.Tab value="database" leftSection={<IconDatabase size="1rem" />}>
                 {t("Board.Tabs.Database")}
               </Tabs.Tab>
@@ -290,6 +295,9 @@ function BoardAnalysis() {
             </Tabs.Panel>
             <Tabs.Panel value="annotate" flex={1} style={{ overflowY: "hidden" }}>
               <AnnotationPanel />
+            </Tabs.Panel>
+            <Tabs.Panel value="coach" flex={1} style={{ overflowY: "hidden" }}>
+              <CoachPanel />
             </Tabs.Panel>
             <Tabs.Panel value="analysis" flex={1} style={{ overflowY: "hidden" }}>
               <AnalysisPanel />

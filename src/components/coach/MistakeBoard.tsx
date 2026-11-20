@@ -21,7 +21,7 @@ export function MistakeBoard({
   onMove,
   highlightSquare,
   lastMove,
-  size = 420,
+  size = "large",
 }: {
   fen: string;
   orientation: "white" | "black";
@@ -30,7 +30,8 @@ export function MistakeBoard({
   highlightSquare?: string | null;
   /** UCI of the move that led to this position (highlighted). */
   lastMove?: string | null;
-  size?: number;
+  /** Pixel width, or "large" to fill the available height (drills and puzzles). */
+  size?: number | "large";
 }) {
   const [pos] = positionFromFen(fen);
   const dests = pos && onMove ? chessgroundDests(pos) : new Map();
@@ -41,7 +42,11 @@ export function MistakeBoard({
   ];
 
   return (
-    <Box w={size} maw="100%">
+    <Box
+      w={size === "large" ? "min(calc(100vh - 215px), 62vw)" : size}
+      miw={size === "large" ? 320 : undefined}
+      maw="100%"
+    >
       <Box className={classes.chessboard}>
         <Chessground
           fen={fen}
