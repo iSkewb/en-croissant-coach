@@ -43,6 +43,8 @@ import MistakeDrill from "../MistakeDrill";
 import { TIME_CONTROLS } from "../playLogic";
 import { type Drill, nextDrill } from "../endgame/curriculum";
 import EndgameSession from "../endgame/EndgameSession";
+import OpeningsStep from "../openings/OpeningsStep";
+import { counts as openingCounts, parseLine } from "../openings/repertoire";
 import { coachMessage, stepIntro } from "./coachVoice";
 import {
   type Focus,
@@ -68,6 +70,7 @@ type Data = {
   profile: PuzzleProfile | null;
   lastGamePattern: string | null;
   endgame: Drill | null;
+  openings: { due: number; fresh: number; hasLines: boolean } | null;
 };
 
 export function focusFromInsight(insight: Insight | null): Focus | null {
@@ -82,7 +85,7 @@ function daysBetween(a: string, b: string): number {
 async function loadData(selectedDb: string | null): Promise<Data> {
   const tz = tzOffsetMinutes();
   const safe = <T,>(p: Promise<T>, fallback: T) => p.catch(() => fallback);
-  const [today, history, stats, insight, maia, maiaSummary, dbs, profile, recent, endgames] =
+  const [today, history, stats, insight, maia, maiaSummary, dbs, profile, recent, endgames, rep] =
     await Promise.all([
       training.today(tz),
       safe(training.history(120, tz), [] as DayActivity[]),
@@ -94,6 +97,7 @@ async function loadData(selectedDb: string | null): Promise<Data> {
       safe(training.puzzleProfile(), null),
       safe(training.mistakes({ limit: 40 }), []),
       safe(training.endgameStats(tz), null),
+      safe((async () => Promise.all([training.repLines(), training.repCards()]))(), null),
     ]);
   const db = dbs.find((d) => d.path === selectedDb) ?? dbs[0];
   // Costliest serious mistake in the most recent analysed game.
@@ -112,6 +116,12 @@ async function loadData(selectedDb: string | null): Promise<Data> {
     profile,
     lastGamePattern: worst ? primaryLabel(worst.tags) : null,
     endgame: endgames ? nextDrill(endgames) : null,
+    openings: rep
+      ? {
+          ...openingCounts(rep[0].map(parseLine), rep[1], new Date()),
+          hasLines: rep[0].length > 0,
+        }
+      : null,
   };
 }
 
@@ -389,6 +399,14 @@ function ActiveStep({
       />
     );
   }
+  if (id === "openings")
+    return shell(
+      <OpeningsStep
+        date={date}
+        size={step?.target && step.target > 1 ? step.target : 8}
+        onDone={onBack}
+      />,
+    );
   if (id === "endgame" && data.endgame)
     return shell(
       <EndgameSession
@@ -454,6 +472,7 @@ export default function TodayLesson({ onDataChanged }: { onDataChanged?: () => v
       daysSinceInsight: since,
       totalMistakes: data.stats?.mistakes ?? 0,
       endgame: data.endgame,
+      openings: data.openings,
     });
   }, [data, prefs, focus]);
 

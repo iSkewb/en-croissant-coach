@@ -137,6 +137,31 @@ CREATE TABLE IF NOT EXISTS endgame_attempts (
     moves      INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS rep_lines (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT DEFAULT (datetime('now')),
+    side       TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    moves      TEXT NOT NULL,
+    source     TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS rep_cards (
+    side      TEXT NOT NULL,
+    pos_key   TEXT NOT NULL,
+    card_json TEXT NOT NULL,
+    due       TEXT NOT NULL,
+    PRIMARY KEY (side, pos_key)
+);
+
+CREATE TABLE IF NOT EXISTS rep_review_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT DEFAULT (datetime('now')),
+    side       TEXT NOT NULL,
+    pos_key    TEXT NOT NULL,
+    lapse      INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS lesson_marks (
     date       TEXT NOT NULL,
     mark       TEXT NOT NULL,
@@ -1007,6 +1032,7 @@ impl Store {
                 &date,
             )?,
             maia_games: self.count_on("maia_games WHERE 1=1", &tz, &date)?,
+            opening_reviews: self.count_on("rep_review_log WHERE 1=1", &tz, &date)?,
             games_analyzed,
             insight_today: latest_insight_date.as_deref() == Some(date.as_str()),
             latest_insight_date,
@@ -1055,6 +1081,94 @@ impl Store {
             });
         }
         Ok(out)
+    }
+
+    // ---------- opening repertoire ----------
+
+    pub fn rep_lines(&self) -> TResult<Vec<super::RepLine>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, side, name, moves, source FROM rep_lines ORDER BY side DESC, id")?;
+        let rows = stmt.query_map([], |r| {
+            Ok(super::RepLine {
+                id: r.get(0)?,
+                side: r.get(1)?,
+                name: r.get(2)?,
+                moves: r.get(3)?,
+                source: r.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Insert (id = None) or update a line; returns its id.
+    pub fn rep_save_line(&self, l: &super::RepLine) -> TResult<i64> {
+        match l.id {
+            Some(id) => {
+                self.conn.execute(
+                    "UPDATE rep_lines SET side = ?2, name = ?3, moves = ?4, source = ?5 WHERE id = ?1",
+                    params![id, l.side, l.name, l.moves, l.source],
+                )?;
+                Ok(id)
+            }
+            None => {
+                self.conn.execute(
+                    "INSERT INTO rep_lines (side, name, moves, source) VALUES (?1, ?2, ?3, ?4)",
+                    params![l.side, l.name, l.moves, l.source],
+                )?;
+                Ok(self.conn.last_insert_rowid())
+            }
+        }
+    }
+
+    pub fn rep_delete_line(&self, id: i64) -> TResult<()> {
+        self.conn.execute("DELETE FROM rep_lines WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    pub fn rep_cards(&self) -> TResult<Vec<super::RepCard>> {
+        let mut stmt = self.conn.prepare("SELECT side, pos_key, card_json, due FROM rep_cards")?;
+        let rows = stmt.query_map([], |r| {
+            Ok(super::RepCard { side: r.get(0)?, pos_key: r.get(1)?, card_json: r.get(2)?, due: r.get(3)? })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Save a card's schedule; `log` = this was a review (counts toward today's lesson).
+    pub fn rep_save_card(&self, c: &super::RepCard, log: Option<bool>) -> TResult<()> {
+        self.conn.execute(
+            "INSERT INTO rep_cards (side, pos_key, card_json, due) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(side, pos_key) DO UPDATE SET card_json = excluded.card_json, due = excluded.due",
+            params![c.side, c.pos_key, c.card_json, c.due],
+        )?;
+        if let Some(lapse) = log {
+            self.conn.execute(
+                "INSERT INTO rep_review_log (side, pos_key, lapse) VALUES (?1, ?2, ?3)",
+                params![c.side, c.pos_key, lapse],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Your most recent analysed games from the standard start, for repertoire coverage.
+    pub fn rep_games(&self, limit: u32) -> TResult<Vec<super::RepGame>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, player_color, moves_uci, date,
+                    CASE WHEN player_color = 'white' THEN black ELSE white END, url
+             FROM games WHERE moves_uci IS NOT NULL AND moves_uci != '' AND (start_fen IS NULL OR start_fen LIKE 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w%')
+             ORDER BY date DESC, analyzed_at DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map([limit], |r| {
+            Ok(super::RepGame {
+                game_id: r.get(0)?,
+                color: r.get(1)?,
+                moves_uci: r.get(2)?,
+                date: r.get(3)?,
+                opponent: r.get(4)?,
+                url: r.get(5)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
     pub fn record_endgame(&self, a: &super::EndgameAttempt) -> TResult<()> {
@@ -1115,6 +1229,40 @@ impl Store {
 mod tests {
     use super::*;
     use crate::training::ingest::parse_pgn_str;
+
+    #[test]
+    fn repertoire_lines_cards_and_log() {
+        let store = Store::open_in_memory().unwrap();
+        let mut line = crate::training::RepLine {
+            id: None,
+            side: "white".into(),
+            name: "London".into(),
+            moves: "d2d4 d7d5 c1f4".into(),
+            source: "starter".into(),
+        };
+        let id = store.rep_save_line(&line).unwrap();
+        line.id = Some(id);
+        line.name = "London main".into();
+        store.rep_save_line(&line).unwrap();
+        let lines = store.rep_lines().unwrap();
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].name, "London main");
+        let card = crate::training::RepCard {
+            side: "white".into(),
+            pos_key: "k".into(),
+            card_json: "{}".into(),
+            due: "2026-01-01T00:00:00Z".into(),
+        };
+        store.rep_save_card(&card, Some(false)).unwrap();
+        store.rep_save_card(&crate::training::RepCard { due: "2027-01-01T00:00:00Z".into(), ..card.clone() }, None).unwrap();
+        let cards = store.rep_cards().unwrap();
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].due, "2027-01-01T00:00:00Z");
+        assert_eq!(store.today_counts(0).unwrap().opening_reviews, 1);
+        store.rep_delete_line(id).unwrap();
+        assert!(store.rep_lines().unwrap().is_empty());
+        assert!(store.rep_games(10).unwrap().is_empty());
+    }
 
     #[test]
     fn endgame_stats_count_clean_days() {

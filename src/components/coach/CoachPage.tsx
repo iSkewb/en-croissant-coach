@@ -40,6 +40,7 @@ import { MistakeDetail } from "./MistakeDetail";
 import MistakeDrill from "./MistakeDrill";
 import TodayLesson from "./lesson/TodayLesson";
 import EndgameCourse from "./endgame/EndgameCourse";
+import OpeningsPage from "./openings/OpeningsPage";
 import { toChessComRapid } from "./playLogic";
 
 function StatTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
@@ -515,7 +516,9 @@ export default function CoachPage() {
   const [selected, setSelected] = useState<Mistake | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tab, setTab] = useState<string | null>("today");
-  const [practiceKind, setPracticeKind] = useState<"drills" | "puzzles" | "endgames">("drills");
+  const [practiceKind, setPracticeKind] = useState<"drills" | "openings" | "puzzles" | "endgames">(
+    "drills",
+  );
   const [practice, setPractice] = useState<PracticeTarget | null>(null);
   const clearPractice = useCallback(() => setPractice(null), []);
 
@@ -564,18 +567,23 @@ export default function CoachPage() {
               <SegmentedControl
                 w="fit-content"
                 value={practiceKind}
-                onChange={(v) => setPracticeKind(v as "drills" | "puzzles" | "endgames")}
+                onChange={(v) =>
+                  setPracticeKind(v as "drills" | "openings" | "puzzles" | "endgames")
+                }
                 data={[
                   {
                     value: "drills",
                     label: `My mistakes${stats && stats.cardsDue > 0 ? ` (${stats.cardsDue})` : ""}`,
                   },
+                  { value: "openings", label: "Openings" },
                   { value: "puzzles", label: "Puzzles" },
                   { value: "endgames", label: "Endgames" },
                 ]}
               />
               {practiceKind === "drills" ? (
                 <MistakeDrill onChange={reload} />
+              ) : practiceKind === "openings" ? (
+                <OpeningsPage />
               ) : practiceKind === "endgames" ? (
                 <EndgameCourse />
               ) : (

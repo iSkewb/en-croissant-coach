@@ -7,6 +7,7 @@
 export type LessonLength = 20 | 35 | 60;
 export type StepId =
     | "online"
+    | "openings"
     | "warmup"
     | "review"
     | "endgame"
@@ -42,6 +43,7 @@ export type PlanInput = {
         warmupPuzzles: number;
         focusPuzzles: number;
         maiaGames: number;
+        openingReviews?: number;
         marks: string[];
         insightToday: boolean;
     };
@@ -56,6 +58,8 @@ export type PlanInput = {
     totalMistakes: number;
     /** The endgame drill the coach would pick next (null = none available). */
     endgame?: { title: string } | null;
+    /** Opening repertoire: positions due / never practised, and whether any lines exist. */
+    openings?: { due: number; fresh: number; hasLines: boolean } | null;
 };
 
 export type LessonStep = {
@@ -87,6 +91,8 @@ const SIZES: Record<
     35: { warmup: 4, review: 6, focus: 6, playMin: 15, lookMin: 4 },
     60: { warmup: 5, review: 10, focus: 10, playMin: 25, lookMin: 6 },
 };
+
+const OPENING_SIZE: Record<LessonLength, number> = { 20: 6, 35: 8, 60: 12 };
 
 export const WEEKDAY_NAMES = [
     "Sunday",
@@ -157,6 +163,41 @@ export function planLesson(input: PlanInput): LessonPlan {
             },
             marks.has("online"),
         );
+    }
+
+    // Openings: a few repertoire positions at the start of every lesson.
+    const op = input.openings;
+    if (op) {
+        const size = OPENING_SIZE[settings.length];
+        const reviewed = today.openingReviews ?? 0;
+        const doneOpen = marks.has("openings") || reviewed >= size;
+        if (!op.hasLines)
+            add(
+                {
+                    id: "openings",
+                    title: "Openings",
+                    detail: "Pick your repertoire to start practising it",
+                    minutes: 3,
+                    target: 1,
+                    progress: doneOpen ? 1 : 0,
+                },
+                doneOpen,
+            );
+        else if (op.due + op.fresh > 0 || reviewed > 0 || doneOpen)
+            add(
+                {
+                    id: "openings",
+                    title: "Openings",
+                    detail:
+                        op.due > 0
+                            ? `${op.due} position${op.due === 1 ? "" : "s"} due from your repertoire`
+                            : "Learn new moves from your repertoire",
+                    minutes: Math.ceil(size * 0.4) + 1,
+                    target: size,
+                    progress: Math.min(reviewed, size),
+                },
+                doneOpen,
+            );
     }
 
     // Endgames: every lesson at 60 min, every other training day at 35 (instead of the

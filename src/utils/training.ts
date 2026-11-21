@@ -72,10 +72,29 @@ export type TodayCounts = {
     warmupPuzzles: number;
     focusPuzzles: number;
     maiaGames: number;
+    openingReviews: number;
     gamesAnalyzed: number;
     marks: string[];
     insightToday: boolean;
     latestInsightDate: string | null;
+};
+
+export type RepLine = {
+    id: number | null;
+    side: "white" | "black";
+    name: string;
+    /** UCI moves from the standard start, space separated. */
+    moves: string;
+    source: "starter" | "mine" | "game";
+};
+export type RepCard = { side: "white" | "black"; posKey: string; cardJson: string; due: string };
+export type RepGame = {
+    gameId: string;
+    color: "white" | "black";
+    movesUci: string;
+    date: string | null;
+    opponent: string | null;
+    url: string | null;
 };
 
 export type EndgameAttempt = { drillId: string; success: boolean; clean: boolean; moves: number };
@@ -279,6 +298,14 @@ export const training = {
         invoke<DayActivity[]>("training_history", { days, tzOffsetMinutes }),
     setMark: (date: string, mark: string, on: boolean) =>
         invoke<void>("training_set_mark", { date, mark, on }),
+    repLines: () => invoke<RepLine[]>("training_rep_lines"),
+    repSaveLine: (line: RepLine) => invoke<number>("training_rep_save_line", { line }),
+    repDeleteLine: (id: number) => invoke<void>("training_rep_delete_line", { id }),
+    repCards: () => invoke<RepCard[]>("training_rep_cards"),
+    /** `review`: null = just reschedule; true/false = a review (lapse or not) for today's count. */
+    repSaveCard: (card: RepCard, review: boolean | null) =>
+        invoke<void>("training_rep_save_card", { card, review }),
+    repGames: (limit = 60) => invoke<RepGame[]>("training_rep_games", { limit }),
     endgameRecord: (attempt: EndgameAttempt, tzOffsetMinutes: number) =>
         invoke<EndgameStat[]>("training_endgame_record", { attempt, tzOffsetMinutes }),
     endgameStats: (tzOffsetMinutes: number) =>
@@ -352,7 +379,7 @@ export function tagHint(tags: string[]): string {
 
 const scheduler = fsrs(generatorParameters({ enable_fuzz: true }));
 
-function reviveCard(json: string | null): Card {
+export function reviveCard(json: string | null): Card {
     if (!json) return createEmptyCard();
     const raw = JSON.parse(json);
     return {
@@ -360,6 +387,16 @@ function reviveCard(json: string | null): Card {
         due: new Date(raw.due),
         last_review: raw.last_review ? new Date(raw.last_review) : undefined,
     } as Card;
+}
+
+/** Next schedule for a card after a review. */
+export function scheduleCard(
+    json: string | null,
+    rating: "good" | "hard" | "again",
+    now = new Date(),
+): Card {
+    const r = rating === "good" ? Rating.Good : rating === "hard" ? Rating.Hard : Rating.Again;
+    return scheduler.repeat(reviveCard(json), now)[r].card;
 }
 
 /** Grade a drill attempt and persist the new schedule. */

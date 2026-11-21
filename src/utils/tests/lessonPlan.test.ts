@@ -149,6 +149,27 @@ test("endgames rotate in by lesson length", () => {
     expect(planLesson({ ...base, weekday: 2 }).steps.map((s) => s.id)).not.toContain("endgame");
 });
 
+test("openings: first step when anything is due or new; setup when no lines", () => {
+    const withOps = (o: PlanInput["openings"], extra: Partial<PlanInput["today"]> = {}) =>
+        planLesson({ ...base, openings: o, today: { ...base.today, ...extra } }).steps;
+    expect(withOps({ due: 3, fresh: 10, hasLines: true })[0]).toMatchObject({
+        id: "openings",
+        target: 8,
+        detail: "3 positions due from your repertoire",
+    });
+    expect(withOps({ due: 0, fresh: 0, hasLines: true }).map((s) => s.id)).not.toContain(
+        "openings",
+    );
+    expect(withOps({ due: 0, fresh: 0, hasLines: false })[0].detail).toContain(
+        "Pick your repertoire",
+    );
+    expect(withOps({ due: 5, fresh: 0, hasLines: true }, { openingReviews: 8 })[0].done).toBe(true);
+    expect(withOps({ due: 5, fresh: 0, hasLines: true }, { marks: ["openings"] })[0].done).toBe(
+        true,
+    );
+    expect(planLesson(base).steps.map((s) => s.id)).not.toContain("openings");
+});
+
 test("schedule helpers", () => {
     const days = DEFAULT_LESSON_SETTINGS.trainingDays; // Mon Tue Thu Sat
     expect(isLastTrainingDayOfWeek(6, days)).toBe(true);

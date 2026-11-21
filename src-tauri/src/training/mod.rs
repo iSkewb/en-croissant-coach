@@ -424,12 +424,46 @@ pub struct TodayCounts {
     pub warmup_puzzles: u32,
     pub focus_puzzles: u32,
     pub maia_games: u32,
+    pub opening_reviews: u32,
     pub games_analyzed: u32,
     /// Manual marks for today (e.g. "lookback", "lesson_complete", "skip:warmup").
     pub marks: Vec<String>,
     pub insight_today: bool,
     /// Local date of the latest pattern analysis, if any.
     pub latest_insight_date: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RepLine {
+    pub id: Option<i64>,
+    /// "white" or "black": the side you play in this line.
+    pub side: String,
+    pub name: String,
+    /// UCI moves from the standard start, space separated.
+    pub moves: String,
+    /// "starter", "mine" or "game".
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RepCard {
+    pub side: String,
+    pub pos_key: String,
+    pub card_json: String,
+    pub due: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RepGame {
+    pub game_id: String,
+    pub color: String,
+    pub moves_uci: String,
+    pub date: Option<String>,
+    pub opponent: Option<String>,
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]

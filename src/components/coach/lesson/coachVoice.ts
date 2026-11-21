@@ -85,6 +85,8 @@ export function stepIntro(id: StepId, focus: { title: string; rule: string } | n
             return "Easy ones first. Get your eyes moving.";
         case "review":
             return "These are positions from your own games. Find what you missed.";
+        case "openings":
+            return "Play your repertoire from move one. New moves are shown first; then it's from memory.";
         case "endgame":
             return "Endgame technique. Learn it once and it wins games for years.";
         case "focus":

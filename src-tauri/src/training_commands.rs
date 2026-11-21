@@ -15,7 +15,7 @@ use crate::{
         claude_code, coach, coach::Backend, features, ingest, store::Store, uci::UciEngine,
         CoachSettings, CoachSettingsUpdate, CoachSettingsView, DrillCard, DrillLine, IngestOptions,
         maia::{self, MaiaPaths, MaiaStatus},
-        CoachPuzzle, DayActivity, EndgameAttempt, EndgameStat, IngestSummary, Insight, MaiaGameRecord, MaiaSummary, Mistake,
+        CoachPuzzle, DayActivity, EndgameAttempt, EndgameStat, RepCard, RepGame, RepLine, IngestSummary, Insight, MaiaGameRecord, MaiaSummary, Mistake,
         TodayCounts,
         MistakeContext, MistakeFilter,
         PuzzleAttempt, PuzzleProfile, TrainingError, TrainingStats, PROVIDER_API,
@@ -590,4 +590,44 @@ pub async fn training_endgame_stats(
     app: tauri::AppHandle,
 ) -> Result<Vec<EndgameStat>, Error> {
     Ok(Store::open(&db_path(&app)?)?.endgame_stats(tz_offset_minutes)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn training_rep_lines(app: tauri::AppHandle) -> Result<Vec<RepLine>, Error> {
+    Ok(Store::open(&db_path(&app)?)?.rep_lines()?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn training_rep_save_line(line: RepLine, app: tauri::AppHandle) -> Result<i64, Error> {
+    Ok(Store::open(&db_path(&app)?)?.rep_save_line(&line)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn training_rep_delete_line(id: i64, app: tauri::AppHandle) -> Result<(), Error> {
+    Ok(Store::open(&db_path(&app)?)?.rep_delete_line(id)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn training_rep_cards(app: tauri::AppHandle) -> Result<Vec<RepCard>, Error> {
+    Ok(Store::open(&db_path(&app)?)?.rep_cards()?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn training_rep_save_card(
+    card: RepCard,
+    review: Option<bool>,
+    app: tauri::AppHandle,
+) -> Result<(), Error> {
+    Ok(Store::open(&db_path(&app)?)?.rep_save_card(&card, review)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn training_rep_games(limit: u32, app: tauri::AppHandle) -> Result<Vec<RepGame>, Error> {
+    Ok(Store::open(&db_path(&app)?)?.rep_games(limit.clamp(1, 500))?)
 }
