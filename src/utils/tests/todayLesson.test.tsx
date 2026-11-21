@@ -27,6 +27,9 @@ vi.mock("@/components/coach/CoachPlay", async () => {
     InstallCard: () => <div data-testid="install-card" />,
   };
 });
+vi.mock("@/components/coach/endgame/EndgameSession", () => ({
+  default: (p: any) => <div data-testid="endgame-session">{p.drill.title}</div>,
+}));
 vi.mock("@/components/coach/lesson/steps", () => ({
   OnlineStep: () => null,
   LookBackStep: () => <div data-testid="lookback" />,
@@ -60,6 +63,7 @@ vi.mock("@/utils/training", async (orig) => {
       maiaSummary: async () => ({ games: 3, suggestedElo: 1100 }),
       puzzleProfile: async () => ({ rating: 1200, attempts: 0, solved: 0, themeStats: [] }),
       mistakes: async () => [],
+      endgameStats: async () => [],
       setMark: (...a: any[]) => setMark(...(a as [])),
     },
   };
@@ -93,7 +97,7 @@ beforeEach(() => {
   localStorage.clear();
   setMark.mockClear();
   today = {
-    date: "2026-11-17", // a Tuesday: a default training day
+    date: "2026-11-16", // a Monday: a default training day
     drillsReviewed: 0,
     warmupPuzzles: 0,
     focusPuzzles: 0,
@@ -137,7 +141,8 @@ test("shows the ordered lesson with the week's focus and one primary button", as
   expect(steps).toEqual(["step-warmup", "step-review", "step-focus", "step-play", "step-lookback"]);
   expect(container.textContent).toContain("This week's focus");
   expect(container.textContent).toContain("Hanging pieces");
-  expect(q("coach-message")?.textContent).toContain("hanging pieces");
+  expect(q("coach-message")?.textContent).toMatch(/5 steps/);
+  expect(q("coach-message")?.textContent).not.toContain("undefended");
   expect(button("Start: Warm-up")).toBeTruthy();
 });
 
@@ -165,7 +170,7 @@ test("skipping a step records a mark", async () => {
   await render();
   const skip = container.querySelector('[aria-label="Skip Warm-up"]') as HTMLButtonElement;
   await act(async () => skip.click());
-  expect(setMark).toHaveBeenCalledWith("2026-11-17", "skip:warmup", true);
+  expect(setMark).toHaveBeenCalledWith("2026-11-16", "skip:warmup", true);
 });
 
 test("a finished lesson is recorded once", async () => {
@@ -177,7 +182,7 @@ test("a finished lesson is recorded once", async () => {
     marks: ["lookback"],
   });
   await render();
-  expect(setMark).toHaveBeenCalledWith("2026-11-17", "lesson_complete", true);
+  expect(setMark).toHaveBeenCalledWith("2026-11-16", "lesson_complete", true);
   expect(container.textContent).toContain("today's lesson done");
 });
 
@@ -191,4 +196,26 @@ test("rest days offer only due reviews and a train-anyway button", async () => {
   expect(container.textContent).toContain("Rest day");
   await act(async () => button("Train anyway").click());
   expect(setMark).toHaveBeenCalledWith("2026-11-18", "train_anyway", true);
+});
+
+test("every other training day swaps the warm-up for an endgame", async () => {
+  today.date = "2026-11-17"; // Tuesday
+  await render();
+  const steps = [...container.querySelectorAll('[data-testid^="step-"]')].map((e) =>
+    e.getAttribute("data-testid"),
+  );
+  expect(steps).toEqual([
+    "step-review",
+    "step-endgame",
+    "step-focus",
+    "step-play",
+    "step-lookback",
+  ]);
+  expect(container.textContent).toContain("Two-rook checkmate");
+  await act(async () =>
+    (container.querySelector('[aria-label="Start Endgame"]') as HTMLButtonElement).click(),
+  );
+  expect(container.querySelector('[data-testid="endgame-session"]')?.textContent).toBe(
+    "Two-rook checkmate",
+  );
 });

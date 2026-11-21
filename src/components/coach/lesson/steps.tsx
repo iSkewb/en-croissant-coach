@@ -8,7 +8,6 @@ import { downloadLichess } from "@/utils/lichess/api";
 import { type Insight, type Mistake, training } from "@/utils/training";
 import { analyzeAccount, connectedAccounts } from "../autoAnalyze";
 import MistakeDrill from "../MistakeDrill";
-import { COACH_SERIF } from "./settings";
 
 const WEEK_MS = 7 * 24 * 3600 * 1000;
 
@@ -170,7 +169,7 @@ export function CheckinStep({ date, onDone }: { date: string; onDone: () => void
   return (
     <Card withBorder maw={640}>
       <Stack gap="sm">
-        <Text style={{ fontFamily: COACH_SERIF }} size="lg">
+        <Text size="lg" fw={500}>
           {insight.summary}
         </Text>
         {insight.progressNote && (

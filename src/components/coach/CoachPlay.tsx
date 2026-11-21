@@ -700,7 +700,7 @@ export function PlayGame({
           </Text>
         )}
         {goal && !end && (
-          <Text size="sm" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>
+          <Text size="sm" fw={500}>
             Game goal: {goal}
           </Text>
         )}

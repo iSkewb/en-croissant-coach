@@ -434,6 +434,25 @@ pub struct TodayCounts {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct EndgameAttempt {
+    pub drill_id: String,
+    pub success: bool,
+    pub clean: bool,
+    pub moves: u32,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EndgameStat {
+    pub drill_id: String,
+    pub attempts: u32,
+    pub successes: u32,
+    pub clean_days: u32,
+    pub last_date: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct DayActivity {
     pub date: String,
     pub lesson_complete: bool,

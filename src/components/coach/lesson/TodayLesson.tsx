@@ -41,6 +41,8 @@ import { type Game, InstallCard, PlayGame, playSetupAtom } from "../CoachPlay";
 import { PuzzleSession } from "../CoachPuzzles";
 import MistakeDrill from "../MistakeDrill";
 import { TIME_CONTROLS } from "../playLogic";
+import { type Drill, nextDrill } from "../endgame/curriculum";
+import EndgameSession from "../endgame/EndgameSession";
 import { coachMessage, stepIntro } from "./coachVoice";
 import {
   type Focus,
@@ -52,7 +54,7 @@ import {
   type Weekday,
   WEEKDAY_NAMES,
 } from "./lessonPlan";
-import { COACH_SERIF, lessonPrefsAtom, tzOffsetMinutes } from "./settings";
+import { lessonPrefsAtom, tzOffsetMinutes } from "./settings";
 import { CheckinStep, LookBackStep, OnlineStep } from "./steps";
 
 type Data = {
@@ -65,6 +67,7 @@ type Data = {
   puzzleDb: string | null;
   profile: PuzzleProfile | null;
   lastGamePattern: string | null;
+  endgame: Drill | null;
 };
 
 export function focusFromInsight(insight: Insight | null): Focus | null {
@@ -79,7 +82,7 @@ function daysBetween(a: string, b: string): number {
 async function loadData(selectedDb: string | null): Promise<Data> {
   const tz = tzOffsetMinutes();
   const safe = <T,>(p: Promise<T>, fallback: T) => p.catch(() => fallback);
-  const [today, history, stats, insight, maia, maiaSummary, dbs, profile, recent] =
+  const [today, history, stats, insight, maia, maiaSummary, dbs, profile, recent, endgames] =
     await Promise.all([
       training.today(tz),
       safe(training.history(120, tz), [] as DayActivity[]),
@@ -90,6 +93,7 @@ async function loadData(selectedDb: string | null): Promise<Data> {
       safe(getPuzzleDatabases(), []),
       safe(training.puzzleProfile(), null),
       safe(training.mistakes({ limit: 40 }), []),
+      safe(training.endgameStats(tz), null),
     ]);
   const db = dbs.find((d) => d.path === selectedDb) ?? dbs[0];
   // Costliest serious mistake in the most recent analysed game.
@@ -107,6 +111,7 @@ async function loadData(selectedDb: string | null): Promise<Data> {
     puzzleDb: db?.path ?? null,
     profile,
     lastGamePattern: worst ? primaryLabel(worst.tags) : null,
+    endgame: endgames ? nextDrill(endgames) : null,
   };
 }
 
@@ -288,7 +293,7 @@ function StepShell({
         </Button>
         <Title order={4}>{title}</Title>
       </Group>
-      <Text style={{ fontFamily: COACH_SERIF }} size="md" c="dimmed">
+      <Text size="md" c="dimmed">
         {intro}
       </Text>
       {children}
@@ -384,6 +389,17 @@ function ActiveStep({
       />
     );
   }
+  if (id === "endgame" && data.endgame)
+    return shell(
+      <EndgameSession
+        drill={data.endgame}
+        onExit={onBack}
+        onFinished={() => {
+          training.setMark(date, "endgame", true).catch(() => {});
+        }}
+        exitLabel="Back to lesson"
+      />,
+    );
   if (id === "lookback")
     return shell(<LookBackStep date={date} tz={tzOffsetMinutes()} onDone={onBack} />);
   if (id === "online") return shell(<OnlineStep date={date} onDone={onBack} />);
@@ -437,6 +453,7 @@ export default function TodayLesson({ onDataChanged }: { onDataChanged?: () => v
       hasOnlineAccounts: connectedAccounts().length > 0,
       daysSinceInsight: since,
       totalMistakes: data.stats?.mistakes ?? 0,
+      endgame: data.endgame,
     });
   }, [data, prefs, focus]);
 
@@ -529,11 +546,7 @@ export default function TodayLesson({ onDataChanged }: { onDataChanged?: () => v
         <WeekStrip history={data.history} trainingDays={trainingDays} todayDate={data.today.date} />
       </Group>
 
-      <Text
-        style={{ fontFamily: COACH_SERIF, lineHeight: 1.5 }}
-        fz={22}
-        data-testid="coach-message"
-      >
+      <Text fz={19} fw={500} lh={1.5} data-testid="coach-message">
         {message}
       </Text>
 

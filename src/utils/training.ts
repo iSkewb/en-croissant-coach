@@ -78,6 +78,15 @@ export type TodayCounts = {
     latestInsightDate: string | null;
 };
 
+export type EndgameAttempt = { drillId: string; success: boolean; clean: boolean; moves: number };
+export type EndgameStat = {
+    drillId: string;
+    attempts: number;
+    successes: number;
+    cleanDays: number;
+    lastDate: string | null;
+};
+
 export type DayActivity = {
     date: string;
     lessonComplete: boolean;
@@ -270,6 +279,10 @@ export const training = {
         invoke<DayActivity[]>("training_history", { days, tzOffsetMinutes }),
     setMark: (date: string, mark: string, on: boolean) =>
         invoke<void>("training_set_mark", { date, mark, on }),
+    endgameRecord: (attempt: EndgameAttempt, tzOffsetMinutes: number) =>
+        invoke<EndgameStat[]>("training_endgame_record", { attempt, tzOffsetMinutes }),
+    endgameStats: (tzOffsetMinutes: number) =>
+        invoke<EndgameStat[]>("training_endgame_stats", { tzOffsetMinutes }),
     lookbackMistake: (tzOffsetMinutes: number) =>
         invoke<Mistake | null>("training_lookback_mistake", { tzOffsetMinutes }),
     mistake: (id: number) => invoke<Mistake | null>("training_mistake", { id }),

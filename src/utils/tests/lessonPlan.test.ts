@@ -126,6 +126,29 @@ describe("planLesson", () => {
     });
 });
 
+test("endgames rotate in by lesson length", () => {
+    const eg = { ...base, endgame: { title: "Queen checkmate" } };
+    // 35 min, default days Mon/Tue/Thu/Sat: Tue and Sat swap the warm-up for an endgame.
+    expect(planLesson(eg).steps.map((s) => s.id)).not.toContain("endgame");
+    const tue = planLesson({ ...eg, weekday: 2 }).steps.map((s) => s.id);
+    expect(tue).toEqual(["review", "endgame", "focus", "play", "lookback"]);
+    expect(planLesson({ ...eg, weekday: 6 }).steps.map((s) => s.id)).toContain("endgame");
+    // 60 min: every lesson; 20 min: first training day only, instead of focus puzzles.
+    const sixty = { ...eg, settings: { ...eg.settings, length: 60 as const } };
+    expect(planLesson(sixty).steps.map((s) => s.id)).toContain("warmup");
+    expect(planLesson(sixty).steps.map((s) => s.id)).toContain("endgame");
+    const twenty = { ...eg, settings: { ...eg.settings, length: 20 as const } };
+    expect(planLesson(twenty).steps.map((s) => s.id)).toEqual(["review", "endgame"]);
+    expect(planLesson({ ...twenty, weekday: 2 }).steps.map((s) => s.id)).toEqual([
+        "review",
+        "focus",
+    ]);
+    // Done via the "endgame" mark; no drill available -> no step.
+    const done = planLesson({ ...eg, weekday: 2, today: { ...base.today, marks: ["endgame"] } });
+    expect(done.steps.find((s) => s.id === "endgame")!.done).toBe(true);
+    expect(planLesson({ ...base, weekday: 2 }).steps.map((s) => s.id)).not.toContain("endgame");
+});
+
 test("schedule helpers", () => {
     const days = DEFAULT_LESSON_SETTINGS.trainingDays; // Mon Tue Thu Sat
     expect(isLastTrainingDayOfWeek(6, days)).toBe(true);
@@ -177,12 +200,12 @@ describe("coach voice", () => {
         hasAnyData: true,
         daySeed: 0,
     };
-    test("lesson day mentions last game and focus rule", () => {
+    test("lesson day mentions last game and what's left, not the rule (that's in the card)", () => {
         const m = coachMessage(ctx);
         expect(m.startsWith("Good evening, Devon.")).toBe(true);
         expect(m).toContain("left a piece loose");
-        expect(m).toContain("loose pieces");
-        expect(m).toContain("what they can take");
+        expect(m).toMatch(/\d+ steps.*about \d+ minutes/);
+        expect(m).not.toContain("what they can take");
     });
     test("complete, rest and first-time messages", () => {
         const done = planLesson({

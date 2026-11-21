@@ -208,6 +208,8 @@ fn main() {
             training_commands::training_today,
             training_commands::training_history,
             training_commands::training_set_mark,
+            training_commands::training_endgame_record,
+            training_commands::training_endgame_stats,
             training_commands::training_lookback_mistake,
             training_commands::training_drill_queue,
             training_commands::training_save_card,

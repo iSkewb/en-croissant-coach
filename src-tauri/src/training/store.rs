@@ -128,6 +128,15 @@ CREATE TABLE IF NOT EXISTS review_log (
     lapse      INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS endgame_attempts (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT DEFAULT (datetime('now')),
+    drill_id   TEXT NOT NULL,
+    success    INTEGER NOT NULL,
+    clean      INTEGER NOT NULL,
+    moves      INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS lesson_marks (
     date       TEXT NOT NULL,
     mark       TEXT NOT NULL,
@@ -1048,6 +1057,35 @@ impl Store {
         Ok(out)
     }
 
+    pub fn record_endgame(&self, a: &super::EndgameAttempt) -> TResult<()> {
+        self.conn.execute(
+            "INSERT INTO endgame_attempts (drill_id, success, clean, moves) VALUES (?1, ?2, ?3, ?4)",
+            params![a.drill_id, a.success, a.clean, a.moves],
+        )?;
+        Ok(())
+    }
+
+    /// Per-drill totals. `clean_days` = distinct local days with a clean success (mastery stars).
+    pub fn endgame_stats(&self, tz_offset_minutes: i32) -> TResult<Vec<super::EndgameStat>> {
+        let tz = Self::tz(tz_offset_minutes);
+        let mut stmt = self.conn.prepare(
+            "SELECT drill_id, count(*), sum(success),
+                    count(DISTINCT CASE WHEN success AND clean THEN date(created_at, ?1) END),
+                    max(date(created_at, ?1))
+             FROM endgame_attempts GROUP BY drill_id ORDER BY drill_id",
+        )?;
+        let rows = stmt.query_map([&tz], |r| {
+            Ok(super::EndgameStat {
+                drill_id: r.get(0)?,
+                attempts: r.get(1)?,
+                successes: r.get::<_, Option<u32>>(2)?.unwrap_or(0),
+                clean_days: r.get(3)?,
+                last_date: r.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
     /// The costliest mistake from games analysed today: what the "Look back" step reviews.
     pub fn lookback_mistake(&self, tz_offset_minutes: i32) -> TResult<Option<super::Mistake>> {
         let tz = Self::tz(tz_offset_minutes);
@@ -1077,6 +1115,26 @@ impl Store {
 mod tests {
     use super::*;
     use crate::training::ingest::parse_pgn_str;
+
+    #[test]
+    fn endgame_stats_count_clean_days() {
+        let store = Store::open_in_memory().unwrap();
+        let rec = |id: &str, success, clean| {
+            store
+                .record_endgame(&crate::training::EndgameAttempt { drill_id: id.into(), success, clean, moves: 9 })
+                .unwrap()
+        };
+        rec("queen", true, true);
+        rec("queen", true, true);
+        rec("queen", false, false);
+        rec("rook", true, false);
+        let st = store.endgame_stats(0).unwrap();
+        assert_eq!(st.len(), 2);
+        let q = st.iter().find(|s| s.drill_id == "queen").unwrap();
+        assert_eq!((q.attempts, q.successes, q.clean_days), (3, 2, 1));
+        let r = st.iter().find(|s| s.drill_id == "rook").unwrap();
+        assert_eq!((r.successes, r.clean_days), (1, 0));
+    }
     use crate::training::features::*;
 
     #[test]

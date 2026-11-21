@@ -5,7 +5,15 @@
 // → practise this week's weakness → apply it in a game → reflect on the game.
 
 export type LessonLength = 20 | 35 | 60;
-export type StepId = "online" | "warmup" | "review" | "focus" | "play" | "lookback" | "checkin";
+export type StepId =
+    | "online"
+    | "warmup"
+    | "review"
+    | "endgame"
+    | "focus"
+    | "play"
+    | "lookback"
+    | "checkin";
 
 /** 0 = Sunday … 6 = Saturday (JS Date#getDay). */
 export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
@@ -46,6 +54,8 @@ export type PlanInput = {
     /** Days since the last pattern analysis (null = never). */
     daysSinceInsight: number | null;
     totalMistakes: number;
+    /** The endgame drill the coach would pick next (null = none available). */
+    endgame?: { title: string } | null;
 };
 
 export type LessonStep = {
@@ -149,7 +159,22 @@ export function planLesson(input: PlanInput): LessonPlan {
         );
     }
 
-    if (sizes.warmup > 0 && input.puzzleDbAvailable) {
+    // Endgames: every lesson at 60 min, every other training day at 35 (instead of the
+    // warm-up), the first training day of the week at 20 (instead of focus puzzles).
+    const dayIndex = [...settings.trainingDays]
+        .sort((a, b) => mondayIndex(a) - mondayIndex(b))
+        .indexOf(input.weekday);
+    const endgameToday =
+        !!input.endgame &&
+        (settings.length === 60
+            ? true
+            : settings.length === 35
+              ? dayIndex % 2 === 1
+              : dayIndex <= 0);
+    const skipWarmup = endgameToday && settings.length === 35;
+    const skipFocus = endgameToday && settings.length === 20;
+
+    if (sizes.warmup > 0 && input.puzzleDbAvailable && !skipWarmup) {
         add(
             {
                 id: "warmup",
@@ -177,7 +202,21 @@ export function planLesson(input: PlanInput): LessonPlan {
         );
     }
 
-    if (input.puzzleDbAvailable) {
+    if (endgameToday && input.endgame) {
+        add(
+            {
+                id: "endgame",
+                title: "Endgame",
+                detail: input.endgame.title,
+                minutes: 5,
+                target: 1,
+                progress: marks.has("endgame") ? 1 : 0,
+            },
+            marks.has("endgame"),
+        );
+    }
+
+    if (input.puzzleDbAvailable && !skipFocus) {
         add(
             {
                 id: "focus",
@@ -199,7 +238,7 @@ export function planLesson(input: PlanInput): LessonPlan {
                 id: "play",
                 title: "Play a game",
                 detail: input.maiaInstalled
-                    ? `Maia ${input.maiaElo}${input.focus ? ` · goal: ${input.focus.rule}` : ""}`
+                    ? `Maia ${input.maiaElo}${input.focus ? " · with this week's rule as your goal" : ""}`
                     : "Set up Maia on the Play tab first",
                 minutes: sizes.playMin,
                 target: 1,

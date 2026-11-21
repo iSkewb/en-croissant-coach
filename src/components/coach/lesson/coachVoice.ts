@@ -50,26 +50,28 @@ export function coachMessage(ctx: VoiceContext): string {
         parts.push(
             pick(
                 [
-                    `In your last game, the costliest moment was: ${ctx.lastGamePattern.toLowerCase()}.`,
-                    `Last time, the move that hurt most was a case of "${ctx.lastGamePattern.toLowerCase()}".`,
+                    `Your last game turned on one moment: ${ctx.lastGamePattern.toLowerCase()}.`,
+                    `In your last game, the move that hurt most: ${ctx.lastGamePattern.toLowerCase()}.`,
                 ],
                 ctx.daySeed,
             ),
         );
     }
-    if (ctx.focus) {
-        parts.push(
-            pick(
-                [
-                    `This week we're working on ${ctx.focus.title.toLowerCase()}. Today's rule: ${ctx.focus.rule}`,
-                    `Our focus is ${ctx.focus.title.toLowerCase()}. Keep one habit in mind: ${ctx.focus.rule}`,
-                ],
-                ctx.daySeed + 1,
-            ),
-        );
-    } else {
-        parts.push("Let's build the habit of checking what's attacked before every move.");
-    }
+    // The focus and its rule sit in their own card right below, so the message stays short.
+    const left = plan.steps.filter((st) => !st.done);
+    const minutes = left.reduce((acc, st) => acc + st.minutes, 0);
+    const started = plan.steps.some((st) => st.done);
+    parts.push(
+        started
+            ? `${left.length} step${left.length === 1 ? "" : "s"} to go, about ${minutes} minutes.`
+            : pick(
+                  [
+                      `Today's lesson: ${left.length} steps, about ${minutes} minutes.`,
+                      `${left.length} steps today, about ${minutes} minutes. Let's begin.`,
+                  ],
+                  ctx.daySeed + 1,
+              ),
+    );
     if (plan.checkinDay) parts.push("We'll finish with the weekly check-in.");
     return parts.join(" ").replace(/\s+/g, " ").trim();
 }
@@ -83,6 +85,8 @@ export function stepIntro(id: StepId, focus: { title: string; rule: string } | n
             return "Easy ones first. Get your eyes moving.";
         case "review":
             return "These are positions from your own games. Find what you missed.";
+        case "endgame":
+            return "Endgame technique. Learn it once and it wins games for years.";
         case "focus":
             return focus
                 ? `Today's theme: ${focus.title.toLowerCase()}. Take your time on each one.`

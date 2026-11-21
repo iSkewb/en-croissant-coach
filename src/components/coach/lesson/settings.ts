@@ -13,5 +13,3 @@ export const lessonPrefsAtom = atomWithStorage<LessonPrefs>("coach-lesson-prefs"
 
 /** Minutes to add to UTC to get local time (what the backend's date math expects). */
 export const tzOffsetMinutes = () => -new Date().getTimezoneOffset();
-
-export const COACH_SERIF = "Georgia, 'Iowan Old Style', 'Times New Roman', serif";

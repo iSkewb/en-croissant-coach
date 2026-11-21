@@ -15,7 +15,7 @@ use crate::{
         claude_code, coach, coach::Backend, features, ingest, store::Store, uci::UciEngine,
         CoachSettings, CoachSettingsUpdate, CoachSettingsView, DrillCard, DrillLine, IngestOptions,
         maia::{self, MaiaPaths, MaiaStatus},
-        CoachPuzzle, DayActivity, IngestSummary, Insight, MaiaGameRecord, MaiaSummary, Mistake,
+        CoachPuzzle, DayActivity, EndgameAttempt, EndgameStat, IngestSummary, Insight, MaiaGameRecord, MaiaSummary, Mistake,
         TodayCounts,
         MistakeContext, MistakeFilter,
         PuzzleAttempt, PuzzleProfile, TrainingError, TrainingStats, PROVIDER_API,
@@ -569,4 +569,25 @@ pub async fn training_lookback_mistake(
     app: tauri::AppHandle,
 ) -> Result<Option<Mistake>, Error> {
     Ok(Store::open(&db_path(&app)?)?.lookback_mistake(tz_offset_minutes)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn training_endgame_record(
+    attempt: EndgameAttempt,
+    tz_offset_minutes: i32,
+    app: tauri::AppHandle,
+) -> Result<Vec<EndgameStat>, Error> {
+    let store = Store::open(&db_path(&app)?)?;
+    store.record_endgame(&attempt)?;
+    Ok(store.endgame_stats(tz_offset_minutes)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn training_endgame_stats(
+    tz_offset_minutes: i32,
+    app: tauri::AppHandle,
+) -> Result<Vec<EndgameStat>, Error> {
+    Ok(Store::open(&db_path(&app)?)?.endgame_stats(tz_offset_minutes)?)
 }

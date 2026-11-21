@@ -38,8 +38,8 @@ import CoachPuzzles, { type PracticeTarget } from "./CoachPuzzles";
 import CoachSettings from "./CoachSettings";
 import { MistakeDetail } from "./MistakeDetail";
 import MistakeDrill from "./MistakeDrill";
-import { COACH_SERIF } from "./lesson/settings";
 import TodayLesson from "./lesson/TodayLesson";
+import EndgameCourse from "./endgame/EndgameCourse";
 import { toChessComRapid } from "./playLogic";
 
 function StatTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
@@ -198,7 +198,7 @@ function InsightCard({
         )}
         {insight && (
           <>
-            <Text style={{ fontFamily: COACH_SERIF }}>{insight.summary}</Text>
+            <Text>{insight.summary}</Text>
             {[...insight.weaknesses]
               .sort((a, b) => a.priority - b.priority)
               .map((w) => (
@@ -515,7 +515,7 @@ export default function CoachPage() {
   const [selected, setSelected] = useState<Mistake | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tab, setTab] = useState<string | null>("today");
-  const [practiceKind, setPracticeKind] = useState<"drills" | "puzzles">("drills");
+  const [practiceKind, setPracticeKind] = useState<"drills" | "puzzles" | "endgames">("drills");
   const [practice, setPractice] = useState<PracticeTarget | null>(null);
   const clearPractice = useCallback(() => setPractice(null), []);
 
@@ -564,17 +564,20 @@ export default function CoachPage() {
               <SegmentedControl
                 w="fit-content"
                 value={practiceKind}
-                onChange={(v) => setPracticeKind(v as "drills" | "puzzles")}
+                onChange={(v) => setPracticeKind(v as "drills" | "puzzles" | "endgames")}
                 data={[
                   {
                     value: "drills",
                     label: `My mistakes${stats && stats.cardsDue > 0 ? ` (${stats.cardsDue})` : ""}`,
                   },
                   { value: "puzzles", label: "Puzzles" },
+                  { value: "endgames", label: "Endgames" },
                 ]}
               />
               {practiceKind === "drills" ? (
                 <MistakeDrill onChange={reload} />
+              ) : practiceKind === "endgames" ? (
+                <EndgameCourse />
               ) : (
                 <CoachPuzzles
                   insight={insight}
