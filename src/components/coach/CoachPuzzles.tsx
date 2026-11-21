@@ -84,18 +84,26 @@ type Result = { puzzle: CoachPuzzle; solved: boolean };
 
 const SESSION_SIZE = 10;
 
-function PuzzleSession({
+export function PuzzleSession({
   db,
   target,
   profile,
   onProfile,
   onExit,
+  count = SESSION_SIZE,
+  ratingOffset = 0,
+  exitLabel = "Back",
 }: {
   db: string;
   target: PracticeTarget;
   profile: PuzzleProfile;
   onProfile: (p: PuzzleProfile) => void;
   onExit: () => void;
+  /** Puzzles in this session. */
+  count?: number;
+  /** Shift the difficulty window (the warm-up uses easier puzzles). */
+  ratingOffset?: number;
+  exitLabel?: string;
 }) {
   const [puzzles, setPuzzles] = useState<CoachPuzzle[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -116,15 +124,15 @@ function PuzzleSession({
   const load = useCallback(async () => {
     setPuzzles(null);
     setError(null);
-    const [lo, hi] = ratingWindow(profile.rating);
+    const [lo, hi] = ratingWindow(profile.rating + ratingOffset);
     try {
-      let ps = await training.themedPuzzles(db, target.themes, lo, hi, SESSION_SIZE);
-      if (ps.length < SESSION_SIZE) {
+      let ps = await training.themedPuzzles(db, target.themes, lo, hi, count);
+      if (ps.length < count) {
         // Widen the window if the themes are rare around this rating.
-        const [lo2, hi2] = ratingWindow(profile.rating, 400);
-        const more = await training.themedPuzzles(db, target.themes, lo2, hi2, SESSION_SIZE);
+        const [lo2, hi2] = ratingWindow(profile.rating + ratingOffset, 400);
+        const more = await training.themedPuzzles(db, target.themes, lo2, hi2, count);
         const seen = new Set(ps.map((p) => p.id));
-        ps = [...ps, ...more.filter((p) => !seen.has(p.id))].slice(0, SESSION_SIZE);
+        ps = [...ps, ...more.filter((p) => !seen.has(p.id))].slice(0, count);
       }
       if (ps.length === 0) setError("No new puzzles found for these themes. Try other themes.");
       setPuzzles(ps);
@@ -133,7 +141,7 @@ function PuzzleSession({
     } catch (e) {
       setError(String(e));
     }
-  }, [db, target.themes.join(",")]);
+  }, [db, target.themes.join(","), count, ratingOffset]);
 
   useEffect(() => {
     load();
@@ -288,9 +296,9 @@ function PuzzleSession({
             {delta})
           </Text>
           <Group>
-            <Button onClick={load}>Another {SESSION_SIZE}</Button>
-            <Button variant="light" onClick={onExit}>
-              Back
+            <Button onClick={onExit}>{exitLabel}</Button>
+            <Button variant="light" onClick={load}>
+              Another {count}
             </Button>
           </Group>
         </Stack>

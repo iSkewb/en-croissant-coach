@@ -66,6 +66,26 @@ export type Weakness = {
     priority: number;
 };
 
+export type TodayCounts = {
+    date: string;
+    drillsReviewed: number;
+    warmupPuzzles: number;
+    focusPuzzles: number;
+    maiaGames: number;
+    gamesAnalyzed: number;
+    marks: string[];
+    insightToday: boolean;
+    latestInsightDate: string | null;
+};
+
+export type DayActivity = {
+    date: string;
+    lessonComplete: boolean;
+    drills: number;
+    puzzles: number;
+    games: number;
+};
+
 export type Insight = {
     id: number;
     createdAt: string;
@@ -245,6 +265,13 @@ export const training = {
         invoke<string | null>("training_maia_move", { startFen, moves, elo }),
     maiaRecordGame: (game: MaiaGameRecord) => invoke<string>("training_maia_record_game", { game }),
     maiaSummary: () => invoke<MaiaSummary>("training_maia_summary"),
+    today: (tzOffsetMinutes: number) => invoke<TodayCounts>("training_today", { tzOffsetMinutes }),
+    history: (days: number, tzOffsetMinutes: number) =>
+        invoke<DayActivity[]>("training_history", { days, tzOffsetMinutes }),
+    setMark: (date: string, mark: string, on: boolean) =>
+        invoke<void>("training_set_mark", { date, mark, on }),
+    lookbackMistake: (tzOffsetMinutes: number) =>
+        invoke<Mistake | null>("training_lookback_mistake", { tzOffsetMinutes }),
     mistake: (id: number) => invoke<Mistake | null>("training_mistake", { id }),
     drillQueue: (limit = 20, newLimit = 10) =>
         invoke<DrillCard[]>("training_drill_queue", { limit, newLimit }),
@@ -349,3 +376,39 @@ export function formatEval(cp: number): string {
     const v = cp / 100;
     return `${v > 0 ? "+" : ""}${v.toFixed(1)}`;
 }
+
+/** Most informative pattern first; used to show one plain label per mistake. */
+const LABEL_PRIORITY: [string, string][] = [
+    ["missed_mate", "Missed a mate"],
+    ["allowed_mate", "Allowed mate"],
+    ["moved_piece_en_prise", "Moved a piece where it could be taken"],
+    ["ignored_threat", "Missed their threat"],
+    ["removed_defender", "Took away a defender"],
+    ["hung_piece", "Left a piece loose"],
+    ["allowed_fork", "Allowed a fork"],
+    ["missed_fork", "Missed a fork"],
+    ["missed_free_piece", "Missed a free piece"],
+    ["allowed_king_attack", "Walked into an attack"],
+    ["lost_material", "Lost material"],
+    ["missed_material", "Missed winning material"],
+    ["positional", "Positional slip"],
+];
+
+/** One plain-language label for a mistake (instead of a row of tags). */
+export function primaryLabel(tags: string[]): string {
+    for (const [tag, label] of LABEL_PRIORITY) if (tags.includes(tag)) return label;
+    return "Mistake";
+}
+
+/** Short context like "while winning · 2s on the move" (or null). */
+export function mistakeContextLine(tags: string[], secs: number | null): string | null {
+    const bits: string[] = [];
+    if (tags.includes("was_winning")) bits.push("while winning");
+    if (tags.includes("was_losing")) bits.push("while losing");
+    if (tags.includes("time_pressure")) bits.push("short on time");
+    if (tags.includes("rushed") || (secs != null && secs <= 3))
+        bits.push(`${Math.round(secs ?? 0)}s on the move`);
+    return bits.length ? bits.join(" · ") : null;
+}
+
+export const PLAIN_LABELS: Record<string, string> = Object.fromEntries(LABEL_PRIORITY);

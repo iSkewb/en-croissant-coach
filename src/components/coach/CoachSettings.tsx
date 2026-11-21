@@ -2,6 +2,7 @@ import {
   Alert,
   Button,
   Card,
+  Chip,
   Code,
   Group,
   NumberInput,
@@ -18,6 +19,8 @@ import { IconCheck, IconAlertTriangle } from "@tabler/icons-react";
 import { useAtom, useAtomValue } from "jotai";
 import { useEffect, useMemo, useState } from "react";
 import { enginesAtom } from "@/state/atoms";
+import { type LessonLength, type Weekday, WEEKDAY_NAMES } from "./lesson/lessonPlan";
+import { lessonPrefsAtom } from "./lesson/settings";
 import type { LocalEngine } from "@/utils/engines";
 import {
   type CoachProvider,
@@ -31,6 +34,67 @@ const CC_MODELS = [
   { value: "sonnet", label: "Sonnet (balanced)" },
   { value: "opus", label: "Opus (heaviest)" },
 ];
+
+const WEEK_ORDER: Weekday[] = [1, 2, 3, 4, 5, 6, 0];
+
+function LessonSettingsCard() {
+  const [prefs, setPrefs] = useAtom(lessonPrefsAtom);
+  return (
+    <Card withBorder>
+      <Stack>
+        <Title order={5}>Lessons</Title>
+        <TextInput
+          label="What should the coach call you?"
+          placeholder="Your first name"
+          value={prefs.name}
+          onChange={(e) => setPrefs({ ...prefs, name: e.currentTarget.value })}
+        />
+        <div>
+          <Text size="sm" fw={500} mb={4}>
+            Training days
+          </Text>
+          <Chip.Group
+            multiple
+            value={prefs.trainingDays.map(String)}
+            onChange={(v) =>
+              setPrefs({ ...prefs, trainingDays: v.map((d) => Number(d) as Weekday).sort() })
+            }
+          >
+            <Group gap={6}>
+              {WEEK_ORDER.map((d) => (
+                <Chip key={d} value={String(d)} size="sm">
+                  {WEEKDAY_NAMES[d].slice(0, 3)}
+                </Chip>
+              ))}
+            </Group>
+          </Chip.Group>
+          <Text size="xs" c="dimmed" mt={4}>
+            The weekly check-in happens on your last training day of the week.
+          </Text>
+        </div>
+        <div>
+          <Text size="sm" fw={500} mb={4}>
+            Lesson length
+          </Text>
+          <SegmentedControl
+            value={String(prefs.length)}
+            onChange={(v) => setPrefs({ ...prefs, length: Number(v) as LessonLength })}
+            data={[
+              { value: "20", label: "20 min" },
+              { value: "35", label: "35 min" },
+              { value: "60", label: "60 min" },
+            ]}
+          />
+        </div>
+        <Switch
+          label="Open the app on today's lesson"
+          checked={prefs.openOnStart}
+          onChange={(e) => setPrefs({ ...prefs, openOnStart: e.currentTarget.checked })}
+        />
+      </Stack>
+    </Card>
+  );
+}
 
 export default function CoachSettings() {
   const [ingest, setIngest] = useAtom(coachIngestSettingsAtom);
@@ -85,6 +149,7 @@ export default function CoachSettings() {
 
   return (
     <Stack maw={640}>
+      <LessonSettingsCard />
       <Card withBorder>
         <Stack>
           <Title order={5}>Game analysis</Title>

@@ -78,7 +78,7 @@ export const playSetupAtom = atomWithStorage<Setup>("coach-play-setup", {
   takebacks: true,
 });
 
-type Game = {
+export type Game = {
   id: string;
   you: "white" | "black";
   elo: number;
@@ -95,7 +95,7 @@ function installMessage(p: number): string {
   return "Testing the engine…";
 }
 
-function InstallCard({ onInstalled }: { onInstalled: (s: MaiaStatus) => void }) {
+export function InstallCard({ onInstalled }: { onInstalled: (s: MaiaStatus) => void }) {
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -370,14 +370,19 @@ export default function CoachPlay() {
   );
 }
 
-function PlayGame({
+export function PlayGame({
   game,
   onExit,
   onRematch,
+  goal,
+  exitLabel = "Back",
 }: {
   game: Game;
   onExit: () => void;
   onRematch: (elo: number) => void;
+  /** Lesson goal shown during the game. */
+  goal?: string | null;
+  exitLabel?: string;
 }) {
   const setTabs = useSetAtom(tabsAtom);
   const setActiveTab = useSetAtom(activeTabAtom);
@@ -694,6 +699,11 @@ function PlayGame({
             {end.result} by {end.reason}
           </Text>
         )}
+        {goal && !end && (
+          <Text size="sm" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>
+            Game goal: {goal}
+          </Text>
+        )}
         {error && (
           <Alert color="red" p="xs">
             {error}
@@ -811,7 +821,7 @@ function PlayGame({
                 Review in analysis board
               </Button>
               <Button variant="subtle" color="gray" onClick={onExit}>
-                Back
+                {exitLabel}
               </Button>
             </Group>
             <Text size="xs" c="dimmed">

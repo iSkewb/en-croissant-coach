@@ -413,3 +413,31 @@ pub struct MaiaSummary {
     pub openings: Vec<OpeningRow>,
     pub recent: Vec<MaiaRecent>,
 }
+
+/// What you've done today (local date), used to tick off the daily lesson automatically.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TodayCounts {
+    /// Local date, YYYY-MM-DD.
+    pub date: String,
+    pub drills_reviewed: u32,
+    pub warmup_puzzles: u32,
+    pub focus_puzzles: u32,
+    pub maia_games: u32,
+    pub games_analyzed: u32,
+    /// Manual marks for today (e.g. "lookback", "lesson_complete", "skip:warmup").
+    pub marks: Vec<String>,
+    pub insight_today: bool,
+    /// Local date of the latest pattern analysis, if any.
+    pub latest_insight_date: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DayActivity {
+    pub date: String,
+    pub lesson_complete: bool,
+    pub drills: u32,
+    pub puzzles: u32,
+    pub games: u32,
+}

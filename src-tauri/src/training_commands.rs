@@ -15,7 +15,8 @@ use crate::{
         claude_code, coach, coach::Backend, features, ingest, store::Store, uci::UciEngine,
         CoachSettings, CoachSettingsUpdate, CoachSettingsView, DrillCard, DrillLine, IngestOptions,
         maia::{self, MaiaPaths, MaiaStatus},
-        CoachPuzzle, IngestSummary, Insight, MaiaGameRecord, MaiaSummary, Mistake,
+        CoachPuzzle, DayActivity, IngestSummary, Insight, MaiaGameRecord, MaiaSummary, Mistake,
+        TodayCounts,
         MistakeContext, MistakeFilter,
         PuzzleAttempt, PuzzleProfile, TrainingError, TrainingStats, PROVIDER_API,
     },
@@ -527,4 +528,45 @@ pub async fn training_maia_record_game(
 #[specta::specta]
 pub async fn training_maia_summary(app: tauri::AppHandle) -> Result<MaiaSummary, Error> {
     Ok(Store::open(&db_path(&app)?)?.maia_summary()?)
+}
+
+// ---------------------------------------------------------------------------------------
+// Daily lesson
+// ---------------------------------------------------------------------------------------
+
+/// Today's activity (by your local date) for ticking off the lesson checklist.
+#[tauri::command]
+#[specta::specta]
+pub async fn training_today(tz_offset_minutes: i32, app: tauri::AppHandle) -> Result<TodayCounts, Error> {
+    Ok(Store::open(&db_path(&app)?)?.today_counts(tz_offset_minutes)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn training_history(
+    days: u32,
+    tz_offset_minutes: i32,
+    app: tauri::AppHandle,
+) -> Result<Vec<DayActivity>, Error> {
+    Ok(Store::open(&db_path(&app)?)?.history(days.clamp(1, 120), tz_offset_minutes)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn training_set_mark(
+    date: String,
+    mark: String,
+    on: bool,
+    app: tauri::AppHandle,
+) -> Result<(), Error> {
+    Ok(Store::open(&db_path(&app)?)?.set_mark(&date, &mark, on)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn training_lookback_mistake(
+    tz_offset_minutes: i32,
+    app: tauri::AppHandle,
+) -> Result<Option<Mistake>, Error> {
+    Ok(Store::open(&db_path(&app)?)?.lookback_mistake(tz_offset_minutes)?)
 }

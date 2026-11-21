@@ -1,10 +1,22 @@
 import { Anchor, Badge, Button, Group, List, Modal, Stack, Text, Title } from "@mantine/core";
 import { IconExternalLink, IconSparkles } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
-import { formatEval, type Mistake, tagLabel, training } from "@/utils/training";
+import {
+  formatEval,
+  type Mistake,
+  mistakeContextLine,
+  primaryLabel,
+  training,
+} from "@/utils/training";
 import { MistakeBoard, uciToShape } from "./MistakeBoard";
 
-export function MistakeExplanation({ mistake }: { mistake: Mistake }) {
+export function MistakeExplanation({
+  mistake,
+  autoExplain = false,
+}: {
+  mistake: Mistake;
+  autoExplain?: boolean;
+}) {
   const [facts, setFacts] = useState<string[]>([]);
   const [explanation, setExplanation] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -17,6 +29,8 @@ export function MistakeExplanation({ mistake }: { mistake: Mistake }) {
       .facts(mistake.id)
       .then(setFacts)
       .catch(() => setFacts([]));
+    if (autoExplain) explain(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mistake.id]);
 
   async function explain(refresh = false) {
@@ -82,25 +96,22 @@ export function MistakeExplanation({ mistake }: { mistake: Mistake }) {
 }
 
 export function MistakeHeader({ m }: { m: Mistake }) {
+  const context = mistakeContextLine(m.tags, m.timeSpentSecs);
   return (
-    <Stack gap={4}>
+    <Stack gap={2}>
       <Group gap="xs">
-        <Badge
-          color={m.severity === "blunder" ? "red" : m.severity === "mistake" ? "orange" : "yellow"}
-        >
-          {m.severity}
+        <Badge variant="light" color={m.severity === "blunder" ? "red" : "orange"} radius="sm">
+          {primaryLabel(m.tags)}
         </Badge>
-        <Badge variant="outline">{m.phase}</Badge>
-        {m.tags.map((t) => (
-          <Badge key={t} variant="light" color="gray">
-            {tagLabel(t)}
-          </Badge>
-        ))}
+        {context && (
+          <Text size="xs" c="dimmed">
+            {context}
+          </Text>
+        )}
       </Group>
-      <Text size="sm" c="dimmed">
-        vs {m.opponent} · {m.opening ?? "Unknown opening"} · {m.date ?? ""}
-        {m.timeSpentSecs != null && ` · ${Math.round(m.timeSpentSecs)}s spent`}
-        {m.clockSecs != null && ` · ${Math.round(m.clockSecs)}s on clock`}
+      <Text size="xs" c="dimmed">
+        vs {m.opponent} · {m.opening ?? "Unknown opening"}
+        {m.date ? ` · ${m.date}` : ""}
       </Text>
     </Stack>
   );

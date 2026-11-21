@@ -391,6 +391,18 @@ function RootLayout() {
     }
   }, [menu, isNative]);
 
+  // En Croissant Coach: open on today's lesson (Settings → Lessons can turn this off).
+  useEffect(() => {
+    let openOnStart = true;
+    try {
+      const raw = localStorage.getItem("coach-lesson-prefs");
+      if (raw) openOnStart = JSON.parse(raw).openOnStart !== false;
+    } catch {}
+    if (openOnStart && window.location.pathname === "/") navigate({ to: "/coach" });
+    // Only on first launch of the window.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     const unlisten = getCurrentWindow().listen(TauriEvent.DRAG_DROP, (event) => {
       const payload = event.payload as { paths: string[] };

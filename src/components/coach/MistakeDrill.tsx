@@ -91,7 +91,25 @@ function numberedMovetext(sans: string[], startFen: string | null): string {
  * - Tactics are played out for a few moves against the engine.
  * - Back/forward through the moves, retry, explore freely, replay what happened in the game.
  */
-export default function MistakeDrill({ onChange }: { onChange?: () => void }) {
+export default function MistakeDrill({
+  onChange,
+  limit = 20,
+  fixedCards,
+  onFinished,
+  finishLabel = "Back to lesson",
+  autoExplain = false,
+}: {
+  onChange?: () => void;
+  /** How many cards to load (the lesson passes what's left of today's target). */
+  limit?: number;
+  /** Drill exactly these cards (used by the lesson's Look back step). */
+  fixedCards?: DrillCard[];
+  /** Shown as a button when the queue is finished. */
+  onFinished?: () => void;
+  finishLabel?: string;
+  /** Ask the coach for an explanation automatically after each drill. */
+  autoExplain?: boolean;
+}) {
   const ingest = useAtomValue(coachIngestSettingsAtom);
   const engines = useAtomValue(enginesAtom);
   const enginePath = useMemo(() => {
@@ -130,7 +148,7 @@ export default function MistakeDrill({ onChange }: { onChange?: () => void }) {
 
   const loadQueue = useCallback(async () => {
     setLoadingQueue(true);
-    const q = await training.drillQueue(20, 10).catch(() => []);
+    const q = fixedCards ?? (await training.drillQueue(limit, Math.min(10, limit)).catch(() => []));
     setQueue(q);
     setIdx(0);
     setLoadingQueue(false);
@@ -437,9 +455,18 @@ export default function MistakeDrill({ onChange }: { onChange?: () => void }) {
         {done > 0
           ? `You reviewed ${done} position${done === 1 ? "" : "s"}. New cards appear as you analyse more games.`
           : "No drills due. Analyse some games on the Overview tab to create them."}
-        <Button mt="sm" size="xs" variant="light" onClick={loadQueue}>
-          Check again
-        </Button>
+        <Group mt="sm">
+          {onFinished && (
+            <Button size="xs" onClick={onFinished}>
+              {finishLabel}
+            </Button>
+          )}
+          {!fixedCards && (
+            <Button size="xs" variant="light" onClick={loadQueue}>
+              Check again
+            </Button>
+          )}
+        </Group>
       </Alert>
     );
 
@@ -671,7 +698,7 @@ export default function MistakeDrill({ onChange }: { onChange?: () => void }) {
               </Tooltip>
             </Group>
             <MistakeHeader m={m} />
-            <MistakeExplanation key={m.id} mistake={m} />
+            <MistakeExplanation key={m.id} mistake={m} autoExplain={autoExplain} />
           </>
         )}
       </Stack>

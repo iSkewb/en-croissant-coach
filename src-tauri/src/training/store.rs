@@ -121,6 +121,20 @@ CREATE TABLE IF NOT EXISTS maia_games (
     time_control TEXT
 );
 
+CREATE TABLE IF NOT EXISTS review_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT DEFAULT (datetime('now')),
+    mistake_id INTEGER NOT NULL,
+    lapse      INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS lesson_marks (
+    date       TEXT NOT NULL,
+    mark       TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (date, mark)
+);
+
 CREATE TABLE IF NOT EXISTS insights (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at        TEXT DEFAULT (datetime('now')),
@@ -590,6 +604,10 @@ impl Store {
                 reviews = reviews + 1, lapses = lapses + ?4",
             params![mistake_id, card_json, due_iso, lapse as i32],
         )?;
+        self.conn.execute(
+            "INSERT INTO review_log (mistake_id, lapse) VALUES (?1, ?2)",
+            params![mistake_id, lapse as i32],
+        )?;
         Ok(())
     }
 
@@ -929,6 +947,118 @@ impl Store {
         Ok(s)
     }
 
+    /// SQLite modifier that shifts UTC timestamps to the user's local time.
+    fn tz(offset_minutes: i32) -> String {
+        format!("{offset_minutes:+} minutes")
+    }
+
+    pub fn local_today(&self, tz_offset_minutes: i32) -> TResult<String> {
+        Ok(self.conn.query_row(
+            "SELECT date('now', ?1)",
+            [Self::tz(tz_offset_minutes)],
+            |r| r.get(0),
+        )?)
+    }
+
+    fn count_on(&self, sql_where_table: &str, tz: &str, date: &str) -> TResult<u32> {
+        Ok(self.conn.query_row(
+            &format!("SELECT count(*) FROM {sql_where_table} AND date(created_at, ?1) = ?2"),
+            params![tz, date],
+            |r| r.get(0),
+        )?)
+    }
+
+    pub fn today_counts(&self, tz_offset_minutes: i32) -> TResult<super::TodayCounts> {
+        let tz = Self::tz(tz_offset_minutes);
+        let date = self.local_today(tz_offset_minutes)?;
+        let marks = {
+            let mut stmt = self.conn.prepare("SELECT mark FROM lesson_marks WHERE date = ?1 ORDER BY mark")?;
+            let it = stmt.query_map([&date], |r| r.get::<_, String>(0))?;
+            it.collect::<Result<Vec<_>, _>>()?
+        };
+        let games_analyzed: u32 = self.conn.query_row(
+            "SELECT count(*) FROM games WHERE date(analyzed_at, ?1) = ?2",
+            params![tz, date],
+            |r| r.get(0),
+        )?;
+        let latest_insight_date: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT date(created_at, ?1) FROM insights ORDER BY id DESC LIMIT 1",
+                [&tz],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(super::TodayCounts {
+            drills_reviewed: self.count_on("review_log WHERE 1=1", &tz, &date)?,
+            warmup_puzzles: self.count_on("puzzle_attempts WHERE weakness = 'Warm-up'", &tz, &date)?,
+            focus_puzzles: self.count_on(
+                "puzzle_attempts WHERE (weakness IS NULL OR weakness != 'Warm-up')",
+                &tz,
+                &date,
+            )?,
+            maia_games: self.count_on("maia_games WHERE 1=1", &tz, &date)?,
+            games_analyzed,
+            insight_today: latest_insight_date.as_deref() == Some(date.as_str()),
+            latest_insight_date,
+            marks,
+            date,
+        })
+    }
+
+    pub fn set_mark(&self, date: &str, mark: &str, on: bool) -> TResult<()> {
+        if on {
+            self.conn.execute(
+                "INSERT OR IGNORE INTO lesson_marks (date, mark) VALUES (?1, ?2)",
+                params![date, mark],
+            )?;
+        } else {
+            self.conn.execute(
+                "DELETE FROM lesson_marks WHERE date = ?1 AND mark = ?2",
+                params![date, mark],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Activity for each of the last `days` local dates (oldest first), for the week strip and streak.
+    pub fn history(&self, days: u32, tz_offset_minutes: i32) -> TResult<Vec<super::DayActivity>> {
+        let tz = Self::tz(tz_offset_minutes);
+        let today = self.local_today(tz_offset_minutes)?;
+        let mut out = Vec::new();
+        for back in (0..days).rev() {
+            let date: String = self.conn.query_row(
+                "SELECT date(?1, ?2)",
+                params![today, format!("-{back} days")],
+                |r| r.get(0),
+            )?;
+            let lesson_complete: bool = self.conn.query_row(
+                "SELECT count(*) > 0 FROM lesson_marks WHERE date = ?1 AND mark = 'lesson_complete'",
+                [&date],
+                |r| r.get(0),
+            )?;
+            out.push(super::DayActivity {
+                drills: self.count_on("review_log WHERE 1=1", &tz, &date)?,
+                puzzles: self.count_on("puzzle_attempts WHERE 1=1", &tz, &date)?,
+                games: self.count_on("maia_games WHERE 1=1", &tz, &date)?,
+                lesson_complete,
+                date,
+            });
+        }
+        Ok(out)
+    }
+
+    /// The costliest mistake from games analysed today: what the "Look back" step reviews.
+    pub fn lookback_mistake(&self, tz_offset_minutes: i32) -> TResult<Option<super::Mistake>> {
+        let tz = Self::tz(tz_offset_minutes);
+        let today = self.local_today(tz_offset_minutes)?;
+        let sql = format!(
+            "{MISTAKE_SELECT} WHERE date(g.analyzed_at, ?1) = ?2 AND m.severity != 'inaccuracy'
+             ORDER BY m.win_drop DESC LIMIT 1"
+        );
+        Ok(self.conn.query_row(&sql, params![tz, today], row_to_mistake).optional()?)
+    }
+
     pub fn focus_tags(&self) -> TResult<Vec<String>> {
         Ok(self
             .latest_insight()?
@@ -1001,6 +1131,57 @@ mod tests {
         assert_eq!((s.openings[0].games, s.openings[0].score), (2, 100));
         assert_eq!(s.by_level[0].elo, 1100);
         assert_eq!(s.recent[0].result, "win");
+    }
+
+    #[test]
+    fn today_counts_marks_history_and_lookback() {
+        let store = Store::open_in_memory().unwrap();
+        let tz = -360; // America/Chicago (CST)
+        let today = store.local_today(tz).unwrap();
+        let c = store.today_counts(tz).unwrap();
+        assert_eq!(c.date, today);
+        assert_eq!((c.drills_reviewed, c.focus_puzzles, c.maia_games), (0, 0, 0));
+
+        store.save_card(1, "{}", "2030-01-01T00:00:00Z", false).unwrap_or(());
+        store
+            .record_puzzle_attempt(&crate::training::PuzzleAttempt {
+                puzzle_id: 1,
+                rating: 1200,
+                themes: vec!["fork".into()],
+                weakness: Some("Warm-up".into()),
+                solved: true,
+                hints: 0,
+                seconds: 5.0,
+            })
+            .unwrap();
+        store
+            .record_puzzle_attempt(&crate::training::PuzzleAttempt {
+                puzzle_id: 2,
+                rating: 1200,
+                themes: vec!["fork".into()],
+                weakness: Some("Loose pieces".into()),
+                solved: false,
+                hints: 0,
+                seconds: 5.0,
+            })
+            .unwrap();
+        store.set_mark(&today, "lookback", true).unwrap();
+        store.set_mark(&today, "lesson_complete", true).unwrap();
+        store.set_mark(&today, "lesson_complete", true).unwrap(); // idempotent
+        let c = store.today_counts(tz).unwrap();
+        assert_eq!((c.warmup_puzzles, c.focus_puzzles), (1, 1));
+        assert_eq!(c.marks, vec!["lesson_complete".to_string(), "lookback".to_string()]);
+
+        let h = store.history(7, tz).unwrap();
+        assert_eq!(h.len(), 7);
+        assert_eq!(h[6].date, today);
+        assert!(h[6].lesson_complete);
+        assert_eq!(h[6].puzzles, 2);
+        assert!(!h[5].lesson_complete);
+
+        store.set_mark(&today, "lookback", false).unwrap();
+        assert_eq!(store.today_counts(tz).unwrap().marks, vec!["lesson_complete".to_string()]);
+        assert!(store.lookback_mistake(tz).unwrap().is_none());
     }
 
     #[test]

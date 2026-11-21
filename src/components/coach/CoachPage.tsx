@@ -1,13 +1,14 @@
 import { LineChart } from "@mantine/charts";
 import {
   Alert,
-  Badge,
   Button,
   Card,
+  Collapse,
   Group,
   List,
   Progress,
   ScrollArea,
+  SegmentedControl,
   Select,
   SimpleGrid,
   Stack,
@@ -16,13 +17,16 @@ import {
   Text,
   Title,
 } from "@mantine/core";
-import { IconPuzzle, IconRefresh, IconSparkles, IconTarget } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronRight, IconPuzzle, IconRefresh } from "@tabler/icons-react";
 import { useCallback, useEffect, useState } from "react";
 import { events } from "@/bindings";
 import {
   type Insight,
   INGEST_PROGRESS_ID,
+  type MaiaSummary,
   type Mistake,
+  type PuzzleProfile,
+  primaryLabel,
   type TrainingStats,
   TAG_LABELS,
   tagLabel,
@@ -34,6 +38,9 @@ import CoachPuzzles, { type PracticeTarget } from "./CoachPuzzles";
 import CoachSettings from "./CoachSettings";
 import { MistakeDetail } from "./MistakeDetail";
 import MistakeDrill from "./MistakeDrill";
+import { COACH_SERIF } from "./lesson/settings";
+import TodayLesson from "./lesson/TodayLesson";
+import { toChessComRapid } from "./playLogic";
 
 function StatTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
@@ -167,9 +174,7 @@ function InsightCard({
     <Card withBorder>
       <Stack gap="sm">
         <Group justify="space-between">
-          <Title order={5}>
-            <IconSparkles size="1rem" /> Coach insights
-          </Title>
+          <Title order={5}>What the coach sees</Title>
           <Button
             size="xs"
             variant="light"
@@ -193,51 +198,28 @@ function InsightCard({
         )}
         {insight && (
           <>
-            <Text size="sm">{insight.summary}</Text>
+            <Text style={{ fontFamily: COACH_SERIF }}>{insight.summary}</Text>
             {[...insight.weaknesses]
               .sort((a, b) => a.priority - b.priority)
               .map((w) => (
                 <Card key={w.title} withBorder p="sm" bg="var(--mantine-color-default-hover)">
                   <Stack gap={4}>
-                    <Group gap="xs">
-                      <Badge
-                        color={w.priority === 1 ? "red" : w.priority === 2 ? "orange" : "gray"}
-                      >
-                        P{w.priority}
-                      </Badge>
-                      <Text fw={600}>{w.title}</Text>
-                    </Group>
+                    <Text fw={600}>
+                      {w.priority}. {w.title}
+                    </Text>
                     <Text size="sm">{w.evidence}</Text>
                     <Text size="sm" fw={500}>
                       Rule: {w.ruleOfThumb}
                     </Text>
-                    <Group gap={4}>
-                      {w.drillTags.map((t) => (
-                        <Badge
-                          key={t}
-                          size="xs"
-                          variant="light"
-                          leftSection={<IconTarget size="0.7rem" />}
-                        >
-                          {tagLabel(t)}
-                        </Badge>
-                      ))}
-                      {w.puzzleThemes.map((t) => (
-                        <Badge key={t} size="xs" variant="outline" color="grape">
-                          puzzles: {t}
-                        </Badge>
-                      ))}
-                    </Group>
                     {w.puzzleThemes.length > 0 && (
                       <Group>
                         <Button
                           size="compact-xs"
                           variant="light"
-                          color="grape"
                           leftSection={<IconPuzzle size="0.8rem" />}
                           onClick={() => onPractice({ title: w.title, themes: w.puzzleThemes })}
                         >
-                          Practice with puzzles
+                          Practise this
                         </Button>
                       </Group>
                     )}
@@ -330,7 +312,7 @@ function CountBars({
   );
 }
 
-function Overview({
+function ProgressView({
   stats,
   insight,
   reload,
@@ -343,48 +325,47 @@ function Overview({
   openMistake: (id: number) => void;
   onPractice: (t: PracticeTarget) => void;
 }) {
+  const [profile, setProfile] = useState<PuzzleProfile | null>(null);
+  const [maia, setMaia] = useState<MaiaSummary | null>(null);
+  const [details, setDetails] = useState(false);
+  const [library, setLibrary] = useState(false);
+  const [selected, setSelected] = useState<Mistake | null>(null);
+
+  useEffect(() => {
+    training
+      .puzzleProfile()
+      .then(setProfile)
+      .catch(() => {});
+    training
+      .maiaSummary()
+      .then(setMaia)
+      .catch(() => {});
+  }, []);
+
   // Exclude pure context tags from the "what goes wrong" chart.
   const contextTags = new Set(["was_winning", "was_losing", "time_pressure", "rushed"]);
   return (
-    <Stack>
-      <AnalyzeGames onDone={reload} />
-      <SimpleGrid cols={{ base: 2, md: 4 }}>
-        <StatTile label="Games analysed" value={String(stats?.games ?? 0)} />
+    <Stack maw={960}>
+      <SimpleGrid cols={{ base: 1, sm: 3 }}>
         <StatTile
-          label="Mistakes / game"
+          label="Mistakes per game"
           value={(stats?.mistakesPerGame ?? 0).toFixed(1)}
-          hint="mistakes + blunders"
+          hint={`${stats?.games ?? 0} games analysed · lower is better`}
         />
-        <StatTile label="Blunders" value={String(stats?.blunders ?? 0)} />
         <StatTile
-          label="Drills due"
-          value={String(stats?.cardsDue ?? 0)}
-          hint={`${stats?.cardsTotal ?? 0} in deck`}
+          label="Puzzle rating"
+          value={profile && profile.attempts > 0 ? String(Math.round(profile.rating)) : "–"}
+          hint={profile ? `${profile.solved}/${profile.attempts} solved` : undefined}
         />
-      </SimpleGrid>
-      <InsightCard
-        insight={insight}
-        onOpenMistake={openMistake}
-        onRefreshed={reload}
-        onPractice={onPractice}
-      />
-      <SimpleGrid cols={{ base: 1, md: 2 }}>
-        <CountBars
-          title="What goes wrong"
-          rows={(stats?.byTag ?? []).filter((r) => !contextTags.has(r.key))}
-          label={tagLabel}
+        <StatTile
+          label="Beating Maia at"
+          value={maia && maia.games > 0 ? String(maia.suggestedElo) : "–"}
+          hint={
+            maia && maia.games > 0
+              ? `≈ ${toChessComRapid(maia.suggestedElo)} Chess.com rapid · ${maia.games} games`
+              : "Play a game to find your level"
+          }
         />
-        <CountBars
-          title="When it goes wrong"
-          rows={[
-            ...(stats?.byPhase ?? []),
-            ...(stats?.byTag ?? [])
-              .filter((r) => contextTags.has(r.key))
-              .map((r) => ({ ...r, key: tagLabel(r.key) })),
-          ]}
-        />
-        <CountBars title="By opening" rows={stats?.byOpening ?? []} />
-        <CountBars title="By time control" rows={stats?.byTimeControl ?? []} />
       </SimpleGrid>
       {(stats?.monthlyRate.length ?? 0) > 1 && (
         <Card withBorder>
@@ -392,14 +373,59 @@ function Overview({
             Mistakes per game over time
           </Title>
           <LineChart
-            h={220}
+            h={200}
             data={stats!.monthlyRate}
             dataKey="month"
-            series={[{ name: "mistakesPerGame", label: "Mistakes / game", color: "red.6" }]}
+            series={[{ name: "mistakesPerGame", label: "Mistakes / game", color: "blue.6" }]}
             curveType="monotone"
           />
         </Card>
       )}
+      <InsightCard
+        insight={insight}
+        onOpenMistake={openMistake}
+        onRefreshed={reload}
+        onPractice={onPractice}
+      />
+      <AnalyzeGames onDone={reload} />
+      <Button
+        variant="subtle"
+        justify="flex-start"
+        leftSection={details ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
+        onClick={() => setDetails((d) => !d)}
+      >
+        Breakdown
+      </Button>
+      <Collapse expanded={details}>
+        <SimpleGrid cols={{ base: 1, md: 2 }}>
+          <CountBars
+            title="What goes wrong"
+            rows={(stats?.byTag ?? []).filter((r) => !contextTags.has(r.key))}
+            label={tagLabel}
+          />
+          <CountBars
+            title="When it goes wrong"
+            rows={[
+              ...(stats?.byPhase ?? []),
+              ...(stats?.byTag ?? [])
+                .filter((r) => contextTags.has(r.key))
+                .map((r) => ({ ...r, key: tagLabel(r.key) })),
+            ]}
+          />
+          <CountBars title="By opening" rows={stats?.byOpening ?? []} />
+          <CountBars title="By time control" rows={stats?.byTimeControl ?? []} />
+        </SimpleGrid>
+      </Collapse>
+      <Button
+        variant="subtle"
+        justify="flex-start"
+        leftSection={library ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
+        onClick={() => setLibrary((d) => !d)}
+      >
+        All my mistakes
+      </Button>
+      <Collapse expanded={library}>{library && <MistakeList openMistake={setSelected} />}</Collapse>
+      <MistakeDetail mistake={selected} onClose={() => setSelected(null)} />
     </Stack>
   );
 }
@@ -454,7 +480,7 @@ function MistakeList({ openMistake }: { openMistake: (m: Mistake) => void }) {
               <Table.Th>Move</Table.Th>
               <Table.Th>Played / Best</Table.Th>
               <Table.Th>Win % lost</Table.Th>
-              <Table.Th>Patterns</Table.Th>
+              <Table.Th>What happened</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -473,15 +499,7 @@ function MistakeList({ openMistake }: { openMistake: (m: Mistake) => void }) {
                   </Text>
                 </Table.Td>
                 <Table.Td>{Math.round(m.winDrop)}</Table.Td>
-                <Table.Td>
-                  <Group gap={4}>
-                    {m.tags.map((t) => (
-                      <Badge key={t} size="xs" variant="light" color="gray">
-                        {tagLabel(t)}
-                      </Badge>
-                    ))}
-                  </Group>
-                </Table.Td>
+                <Table.Td>{primaryLabel(m.tags)}</Table.Td>
               </Table.Tr>
             ))}
           </Table.Tbody>
@@ -496,13 +514,15 @@ export default function CoachPage() {
   const [insight, setInsight] = useState<Insight | null>(null);
   const [selected, setSelected] = useState<Mistake | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [tab, setTab] = useState<string | null>("overview");
+  const [tab, setTab] = useState<string | null>("today");
+  const [practiceKind, setPracticeKind] = useState<"drills" | "puzzles">("drills");
   const [practice, setPractice] = useState<PracticeTarget | null>(null);
   const clearPractice = useCallback(() => setPractice(null), []);
 
   function startPractice(t: PracticeTarget) {
     setPractice(t);
-    setTab("puzzles");
+    setPracticeKind("puzzles");
+    setTab("practice");
   }
 
   const reload = useCallback(() => {
@@ -525,41 +545,56 @@ export default function CoachPage() {
   }
 
   return (
-    <Stack p="md" h="100%">
-      <Title order={2}>Coach</Title>
+    <Stack p="md" h="100%" gap="sm">
       {loadError && <Alert color="red">{loadError}</Alert>}
-      <Tabs value={tab} onChange={setTab} keepMounted={false}>
+      <Tabs value={tab} onChange={setTab} keepMounted={false} variant="pills" radius="xl">
         <Tabs.List>
-          <Tabs.Tab value="overview">Overview</Tabs.Tab>
-          <Tabs.Tab value="drill">
-            Drill{stats && stats.cardsDue > 0 ? ` (${stats.cardsDue})` : ""}
-          </Tabs.Tab>
+          <Tabs.Tab value="today">Today</Tabs.Tab>
+          <Tabs.Tab value="practice">Practice</Tabs.Tab>
           <Tabs.Tab value="play">Play</Tabs.Tab>
-          <Tabs.Tab value="puzzles">Puzzles</Tabs.Tab>
-          <Tabs.Tab value="mistakes">Mistakes</Tabs.Tab>
+          <Tabs.Tab value="progress">Progress</Tabs.Tab>
           <Tabs.Tab value="settings">Settings</Tabs.Tab>
         </Tabs.List>
-        <ScrollArea h="calc(100vh - 130px)" pt="md">
-          <Tabs.Panel value="overview">
-            <Overview
+        <ScrollArea h="calc(100vh - 110px)" pt="md">
+          <Tabs.Panel value="today">
+            <TodayLesson onDataChanged={reload} />
+          </Tabs.Panel>
+          <Tabs.Panel value="practice">
+            <Stack>
+              <SegmentedControl
+                w="fit-content"
+                value={practiceKind}
+                onChange={(v) => setPracticeKind(v as "drills" | "puzzles")}
+                data={[
+                  {
+                    value: "drills",
+                    label: `My mistakes${stats && stats.cardsDue > 0 ? ` (${stats.cardsDue})` : ""}`,
+                  },
+                  { value: "puzzles", label: "Puzzles" },
+                ]}
+              />
+              {practiceKind === "drills" ? (
+                <MistakeDrill onChange={reload} />
+              ) : (
+                <CoachPuzzles
+                  insight={insight}
+                  initialTarget={practice}
+                  onTargetUsed={clearPractice}
+                />
+              )}
+            </Stack>
+          </Tabs.Panel>
+          <Tabs.Panel value="play">
+            <CoachPlay />
+          </Tabs.Panel>
+          <Tabs.Panel value="progress">
+            <ProgressView
               stats={stats}
               insight={insight}
               reload={reload}
               openMistake={openMistakeById}
               onPractice={startPractice}
             />
-          </Tabs.Panel>
-          <Tabs.Panel value="play">
-            <CoachPlay />
-          </Tabs.Panel>
-          <Tabs.Panel value="puzzles">
-            <CoachPuzzles insight={insight} initialTarget={practice} onTargetUsed={clearPractice} />
-          </Tabs.Panel>
-          <Tabs.Panel value="drill">
-            <MistakeDrill onChange={reload} />
-          </Tabs.Panel>
-          <Tabs.Panel value="mistakes">
-            <MistakeList openMistake={setSelected} />
           </Tabs.Panel>
           <Tabs.Panel value="settings">
             <CoachSettings />

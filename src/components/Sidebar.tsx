@@ -39,6 +39,7 @@ function NavbarLink({ url, icon: Icon, label }: NavbarLinkProps) {
 }
 
 const linksdata = [
+  { icon: IconSchool, label: "Coach", url: "/coach" },
   { icon: IconChess, label: "Board", url: "/" },
   { icon: IconUser, label: "User", url: "/accounts" },
   { icon: IconFiles, label: "Files", url: "/files" },
@@ -48,7 +49,6 @@ const linksdata = [
     url: "/databases",
   },
   { icon: IconCpu, label: "Engines", url: "/engines" },
-  { icon: IconSchool, label: "Coach", url: "/coach" },
 ];
 
 export function SideBar() {
