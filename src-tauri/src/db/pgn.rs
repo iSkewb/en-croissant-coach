@@ -244,6 +244,9 @@ pub struct GameInProcessing<'a> {
     ply_before_last_move: u16,
     /// Whether this encoder supports variations (only Low compression).
     supports_variations: bool,
+    /// The game can't be imported (e.g. an unsupported start position), so its
+    /// moves are ignored and nothing is stored for it.
+    skip: bool,
 }
 
 struct VariationState {
@@ -275,7 +278,16 @@ impl GameInProcessing<'_> {
             pos_before_last_move: None,
             ply_before_last_move: 0,
             supports_variations: level == CompressionLevel::Low,
+            skip: false,
         })
+    }
+
+    /// A placeholder for a game that can't be imported; the reader still walks
+    /// its movetext, but nothing is played or stored.
+    fn skipped(level: CompressionLevel) -> Result<Self, String> {
+        let mut game = Self::new(Headers::default(), level)?;
+        game.skip = true;
+        Ok(game)
     }
 
     fn finish(mut self) -> StoredGame {
@@ -289,6 +301,9 @@ impl GameInProcessing<'_> {
     }
 
     fn play_san(&mut self, san_plus: &SanPlus) -> Result<(), String> {
+        if self.skip {
+            return Ok(());
+        }
         let chess_move = san_plus
             .san
             .to_move(&self.pos)
@@ -307,7 +322,7 @@ impl GameInProcessing<'_> {
     }
 
     fn begin_variation(&mut self) -> bool {
-        if !self.supports_variations {
+        if !self.supports_variations || self.skip {
             return false;
         }
 
@@ -360,6 +375,15 @@ impl<'a> Visitor for PgnProcessor<'a> {
     fn begin_movetext(&mut self, tags: Self::Tags) -> ControlFlow<Self::Output, Self::Movetext> {
         match GameInProcessing::new(tags, self.level) {
             Ok(game) => ControlFlow::Continue(game),
+            // One game with an unsupported start position (e.g. a Chess.com
+            // odds/custom setup) shouldn't abort a whole account download.
+            Err(error) if self.continue_on_invalid_move => {
+                eprintln!("skipping game: {error}");
+                match GameInProcessing::skipped(self.level) {
+                    Ok(game) => ControlFlow::Continue(game),
+                    Err(error) => ControlFlow::Break(Err(invalid_pgn(error))),
+                }
+            }
             Err(error) => ControlFlow::Break(Err(invalid_pgn(error))),
         }
     }
@@ -505,6 +529,9 @@ impl<'a> PgnProcessor<'a> {
         &mut self,
         movetext: <Self as Visitor>::Movetext,
     ) -> <Self as Visitor>::Output {
+        if movetext.skip {
+            return Ok(());
+        }
         let game = movetext.finish();
         if let (Some(cutoff), Some(timestamp)) = (self.timestamp, game.timestamp()) {
             if timestamp <= i64::from(cutoff) * 1_000_000 {

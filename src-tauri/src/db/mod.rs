@@ -1777,6 +1777,47 @@ mod tests {
     }
 
     #[test]
+    fn import_skips_games_with_unsupported_start_positions() {
+        // Chess.com odds/custom games can start from setups shakmaty rejects
+        // (e.g. extra knights for White). One such game used to abort the whole
+        // account download; now it's skipped and the rest still import.
+        const PGN: &str = r#"[White "a"]
+[Black "b"]
+[Date "2026.11.18"]
+[Result "1-0"]
+
+1. e4 e5 1-0
+
+[White "a"]
+[Black "b"]
+[Date "2026.11.19"]
+[SetUp "1"]
+[FEN "r1bqkb1r/pppppppp/8/8/8/8/PPPPPPPP/NNNNKNNN w kq - 0 1"]
+[Result "0-1"]
+
+1. Nb3 e5 0-1
+
+[White "a"]
+[Black "b"]
+[Date "2026.11.20"]
+[Result "1/2-1/2"]
+
+1. d4 d5 1/2-1/2
+"#;
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("skip.duckdb");
+        let db = Connection::open(&path).unwrap();
+        db.execute_batch(include_str!("init-database.sql")).unwrap();
+        let appender = game_appender(&db).unwrap();
+        let mut processor = pgn::PgnProcessor::new(appender, AixCompressionLevel::Low, true, None);
+        let mut reader = pgn_reader::Reader::new(PGN.as_bytes());
+        while let Some(result) = reader.read_game(&mut processor).unwrap() {
+            result.unwrap();
+        }
+        assert_eq!(processor.count(), 2);
+    }
+
+    #[test]
     fn annotations_survive_import_reopen_edit_and_export() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("annotations.duckdb");
